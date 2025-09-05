@@ -1,0 +1,222 @@
+#!/usr/bin/env pwsh
+$ErrorActionPreference = 'Stop'
+
+# Move to script directory
+Set-Location -LiteralPath $PSScriptRoot
+
+Write-Host "[CTT Viewer] Project: $PSScriptRoot"
+
+function Resolve-Python {
+  $candidates = @('python', 'py')
+  foreach ($c in $candidates) {
+    try {
+      $ver = & $c -c "import sys; print(sys.version)" 2>$null
+      if ($LASTEXITCODE -eq 0 -and $ver) { return $c }
+    } catch {}
+  }
+  throw "No Python interpreter found in PATH. Install Python 3 first."
+}
+
+$python = $null
+try { $python = Resolve-Python } catch { $python = $null }
+$useEmbedded = $false
+if (-not $python) {
+  # Fallback to embedded Python if present
+  $embedPy = Join-Path $PSScriptRoot 'python-embed\python.exe'
+  if (Test-Path $embedPy) {
+    $python = $embedPy
+    $useEmbedded = $true
+    Write-Host "[CTT Viewer] System Python 미발견. 내장 Python 사용: $python"
+  } else {
+    Write-Host "[CTT Viewer] Python3를 찾을 수 없습니다. 설치 후 다시 실행하세요."
+    exit 1
+  }
+} else {
+  Write-Host "[CTT Viewer] Python: $python"
+}
+
+$venvDir = Join-Path $PSScriptRoot '.venv'
+$resetVenv = [string]::IsNullOrEmpty($env:RESET_VENV) ? $false : ($env:RESET_VENV -eq '1')
+if ($resetVenv -and (Test-Path $venvDir)) {
+  Write-Host "[CTT Viewer] Reset venv (.venv)"
+  try { Remove-Item -Recurse -Force -LiteralPath $venvDir } catch {}
+}
+$venvActivate = Join-Path $venvDir 'Scripts\Activate.ps1'
+$venvPython = Join-Path $venvDir 'Scripts\python.exe'
+if (-not $useEmbedded -and (-not (Test-Path $venvActivate) -or -not (Test-Path $venvPython))) {
+  Write-Host "[CTT Viewer] Creating venv (.venv)"
+  & $python -m venv $venvDir
+}
+
+if (-not $useEmbedded) {
+  # Activate venv
+  Write-Host "[CTT Viewer] Activate venv (.venv)"
+  . $venvActivate
+}
+
+function Repair-Pip {
+  Write-Host "[CTT Viewer] Repair pip via ensurepip"
+  try { & $venvPython -m ensurepip -U --default-pip | Out-Null } catch {}
+}
+function Ensure-Pip {
+  try { & $venvPython -m pip --version | Out-Null } catch { Repair-Pip }
+  try { & $venvPython -m pip --version | Out-Null } catch {
+    Write-Host "[CTT Viewer] Bootstrapping pip (get-pip.py)"
+    $tmp = [System.IO.Path]::GetTempFileName() + '.py'
+    try {
+      Invoke-WebRequest -UseBasicParsing -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile $tmp -TimeoutSec 30
+      & $venvPython $tmp
+    } finally { if (Test-Path $tmp) { Remove-Item $tmp -Force } }
+  }
+}
+if ($useEmbedded) {
+  # Install pip into embedded via get-pip, best-effort
+  Write-Host "[CTT Viewer] Embedded Python용 pip 준비"
+  try {
+    & $python -m pip --version | Out-Null
+  } catch {
+    $tmp = [System.IO.Path]::GetTempFileName() + '.py'
+    try {
+      Invoke-WebRequest -UseBasicParsing -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile $tmp -TimeoutSec 30
+      & $python $tmp
+    } finally { if (Test-Path $tmp) { Remove-Item $tmp -Force } }
+  }
+} else {
+  Ensure-Pip
+}
+
+# Install dependencies (fast, offline-aware)
+$req = Join-Path $PSScriptRoot 'requirements.txt'
+if (Test-Path $req) {
+  Write-Host "[CTT Viewer] Installing dependencies"
+  $skip = ($env:SKIP_PIP -eq '1')
+  if (-not $skip) {
+    # Quick module check to skip pip when already satisfied
+    $importOk = $false
+    try {
+      & $venvPython - << 'PY' | Out-Null
+import importlib, sys
+ok = True
+for m in ("flask", "tf.fabric"):
+    try:
+        importlib.import_module(m)
+    except Exception:
+        ok = False
+        break
+raise SystemExit(0 if ok else 1)
+PY
+      if ($LASTEXITCODE -eq 0) { $importOk = $true }
+    } catch {}
+    if ($importOk) {
+      Write-Host "[CTT Viewer] Modules already satisfied; skip pip"
+    } else {
+      if ($useEmbedded) {
+        $embeddedSite = Join-Path $PSScriptRoot 'python-embed\site-packages'
+        if (-not (Test-Path $embeddedSite)) { New-Item -ItemType Directory -Force -Path $embeddedSite | Out-Null }
+        try { & $python -m pip install -r $req -t $embeddedSite } catch {}
+        $env:PYTHONPATH = "$embeddedSite;$PSScriptRoot"
+      } else {
+        $env:PIP_DISABLE_PIP_VERSION_CHECK = '1'
+        if (-not [string]::IsNullOrEmpty($env:PIP_DEFAULT_TIMEOUT)) { } else { $env:PIP_DEFAULT_TIMEOUT = '10' }
+        # Install from local wheels if present
+        $wheelsDir = Join-Path $PSScriptRoot 'data\wheels'
+        if (Test-Path $wheelsDir) {
+          $wheels = Get-ChildItem -Path (Join-Path $wheelsDir '*.whl') -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($wheels) {
+            Write-Host "[CTT Viewer] Installing from local wheels (data\wheels)"
+            try { & $venvPython -m pip install --no-index --find-links $wheelsDir -r $req } catch {}
+          }
+        }
+        # If still missing Flask, try online best-effort
+        $haveFlask = $false
+        try { & $venvPython -c "import flask" 2>$null; if ($LASTEXITCODE -eq 0){ $haveFlask = $true } } catch {}
+        if (-not $haveFlask) {
+          try {
+            if ($env:UPGRADE_PIP -eq '1') { & $venvPython -m pip install --upgrade 'pip<25' | Out-Null }
+          } catch {}
+          try { & $venvPython -m pip install -r $req } catch {}
+        }
+      }
+    }
+  } else {
+    Write-Host "[CTT Viewer] SKIP_PIP=1; skip pip install"
+  }
+}
+
+# Prefer local TF data inside project; copy from user cache if available
+$LocalTf = Join-Path $PSScriptRoot 'data\text-fabric-data'
+$UserTfBhsa = Join-Path $env:USERPROFILE 'text-fabric-data\etcbc\bhsa'
+$LocalBhsa = Join-Path $LocalTf 'etcbc\bhsa'
+if (-not (Test-Path $LocalBhsa) -and (Test-Path $UserTfBhsa)) {
+  Write-Host "[CTT Viewer] 로컬 TF 데이터가 없어 사용자 캐시에서 복사합니다."
+  New-Item -ItemType Directory -Force -Path (Split-Path $LocalBhsa) | Out-Null
+  try { Copy-Item -Recurse -Force -Path $UserTfBhsa -Destination (Split-Path $LocalBhsa) } catch {}
+}
+$env:TF_LOCAL_DIR = $LocalTf
+# Prefer project dir first so .\bhsa is used when present
+$env:TF_LOCATIONS = "$PSScriptRoot;$LocalTf"
+
+# Optional: check TF updates on every launch (default OFF). Enable by setting TF_UPDATE_ON_START=1
+# if (-not $env:TF_UPDATE_ON_START) { $env:TF_UPDATE_ON_START = '0' }
+
+# Auto-detect Korean gloss CSV if not set
+if (-not $env:GLOSS_KO_CSV) {
+  $dataDir = Join-Path $PSScriptRoot 'data'
+  if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Force -Path $dataDir | Out-Null }
+  $bundled = Join-Path $dataDir 'gloss_ko.csv'
+  if (Test-Path $bundled) {
+    $env:GLOSS_KO_CSV = $bundled
+  } else {
+    $dl = Join-Path $env:USERPROFILE 'Downloads'
+    $hit = Get-ChildItem -Path (Join-Path $dl 'all_gloss_*.csv') -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $hit) { $hit = Get-ChildItem -Path (Join-Path $dl '*\all_gloss_*.csv') -ErrorAction SilentlyContinue | Select-Object -First 1 }
+    if ($hit) {
+      Copy-Item -Path $hit.FullName -Destination $bundled -Force
+      $env:GLOSS_KO_CSV = $bundled
+      Write-Host "[CTT Viewer] 한글 gloss 파일 복사: $($hit.FullName) -> $bundled"
+    }
+  }
+}
+
+# Prefetch 기능 제거됨(패키징 스크립트 삭제). 최초 실행 시 필요한 범위만 자동 캐시합니다.
+
+# Resolve a Python executable
+$env:PYTHONUNBUFFERED = '1'
+$hostAddr = '127.0.0.1'
+$candidates = @(5000,5001,5173,8000,5050,5051,7000,7001)
+function Find-FreePort {
+  param([int[]]$Ports)
+  foreach ($p in $Ports) {
+    try {
+      $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $p)
+      $listener.Start(); $listener.Stop(); return $p
+    } catch {}
+  }
+  return 5000
+}
+$port = Find-FreePort -Ports $candidates
+$url = "http://$hostAddr:5001/"
+$env:HOST = $hostAddr
+$env:PORT = 5001
+
+# Start Flask app in a separate window (venv python)
+Write-Host "[CTT Viewer] Starting server: $url"
+$pyToRun = $venvPython
+if ($useEmbedded) { $pyToRun = $python }
+$startInfo = @{ FilePath = $pyToRun; ArgumentList = 'app.py'; WorkingDirectory = $PSScriptRoot; WindowStyle = 'Normal'; }
+$proc = Start-Process @startInfo -PassThru
+
+# Wait for server (best-effort up to ~10s)
+for ($i=0; $i -lt 40; $i++) {
+  Start-Sleep -Milliseconds 250
+  try {
+    $resp = Invoke-WebRequest -UseBasicParsing -Uri $url -TimeoutSec 2
+    if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500) { break }
+  } catch {}
+}
+
+# Open default browser
+Write-Host "[CTT Viewer] Opening: $url"
+Start-Process $url | Out-Null
+
+Write-Host "[CTT Viewer] Server is running in a separate window. Close that window to stop."

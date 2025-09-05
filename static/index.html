@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>ETCBC Clause Hierarchy Viewer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="./styles.css" />
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="controls">
+      <label>Book
+        <select id="book">
+          <option value="genesis">Genesis</option>
+          <!-- 필요 시 추가 -->
+        </select>
+      </label>
+      <label>Chapter
+        <input id="chapter" type="number" min="1" max="50" value="1" />
+      </label>
+      <div class="segmented">
+        <button id="prevBookBtn" title="이전 책">⟪ 이전 책</button>
+        <button id="prevChapterBtn" title="이전 장">⟨ 이전 장</button>
+        <button id="nextChapterBtn" title="다음 장">다음 장 ⟩</button>
+        <button id="nextBookBtn" title="다음 책">다음 책 ⟫</button>
+      </div>
+      <button id="loadBtn">불러오기</button>
+
+      <div class="segmented">
+        <button id="viewTidy" class="active">Tidy Tree</button>
+        <button id="viewList">Indented List</button>
+      </div>
+
+      <div id="orientWrap">
+        <label>Orientation
+          <select id="orientation">
+            <option value="horizontal">Horizontal</option>
+            <option value="vertical">Vertical</option>
+          </select>
+        </label>
+      </div>
+
+      <label>
+        시점 앵커
+        <select id="anchorMode">
+          <option value="center">화면 중심</option>
+          <option value="selection">선택 노드</option>
+        </select>
+      </label>
+
+      <label>
+        보기 깊이
+        <input id="depthRange" type="range" min="0" max="6" value="0" />
+        <span id="depthValue">0</span>
+      </label>
+
+      <label>
+        간격(노드 간)
+        <input id="spacingRange" type="range" min="160" max="1000" step="20" value="280" />
+        <span id="spacingValue">280</span>
+      </label>
+
+      <label>
+        <input id="toggleGloss" type="checkbox" /> Gloss 보기
+      </label>
+      <label>
+        <input id="toggleGlossKo" type="checkbox" /> 한글 Gloss
+      </label>
+      <small id="glossStatus" class="status"></small>
+      <label>
+        <input id="toggleLegend" type="checkbox" /> 유형 안내
+      </label>
+      <label>
+        <input id="toggleDetails" type="checkbox" /> 상세 보기
+      </label>
+    </div>
+  </header>
+
+  <main>
+    <section id="tidyView" class="view visible">
+      <div id="tidyContainer"></div>
+    </section>
+    <section id="listView" class="view">
+      <div id="listContainer"></div>
+    </section>
+    <div id="detailsResizer" class="resizer horizontal" title="드래그하여 상세 높이 조절"></div>
+    <section id="detailsPanel" class="details"></section>
+    <aside id="legendPanel" class="legend"></aside>
+  </main>
+
+  <footer class="footer">
+    <small>
+      Data: ETCBC CTT. Layouts: D3 hierarchy (tree, dendrogram, indented). 
+    </small>
+  </footer>
+
+  <script src="./app.js"></script>
+  </body>
+  </html>
