@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2025-09-07
+### Added
+- macOS double-click launcher: `Start Viewer.command` (uses AUTO_INSTALL=1)
+- Windows portable package build: embeddable Python + preinstalled deps; `Start Viewer (Portable).bat`
+- Platform-specific quick-start docs (README-RUN-*.txt) and FIRST-RUN-CHECKLIST.md
+
+### Changed
+- Release workflow builds OS-specific ZIPs (windows/macos) and a portable Windows ZIP
+- README: beginner quick start, macOS Gatekeeper guidance, release ZIP usage
+
+### Fixed
+- Windows: robust pip bootstrap and embeddable Python site enabling (fixes "No module named pip")
+
 ## [0.2.0] - 2025-09-07
 ### Added
 - Beginner-friendly quick start for Windows/macOS in README
@@ -25,4 +38,3 @@ All notable changes to this project will be documented in this file.
 
 ## [0.1.0] - 2025-08-??
 - Initial import
-
