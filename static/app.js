@@ -23,6 +23,7 @@
   const btnList = document.getElementById('viewList');
   const selOrient = document.getElementById('orientation');
   const selAnchorMode = document.getElementById('anchorMode');
+  const selSource = document.getElementById('sourceSel');
   const chkGloss = document.getElementById('toggleGloss');
   const chkGlossKo = document.getElementById('toggleGlossKo');
   const chkLegend = document.getElementById('toggleLegend');
@@ -38,6 +39,7 @@
   const depthValue = document.getElementById('depthValue');
   const spacingRange = document.getElementById('spacingRange');
   const spacingValue = document.getElementById('spacingValue');
+  const elLoadStatus = document.getElementById('loadStatus');
 
   elLoad.addEventListener('click', loadData);
   // Auto-load on Book change
@@ -88,6 +90,7 @@
   btnList.addEventListener('click', () => switchView('list'));
   selOrient.addEventListener('change', () => { state.orientation = selOrient.value; renderTidy(); });
   if (selAnchorMode) selAnchorMode.addEventListener('change', () => { state.anchorMode = selAnchorMode.value || 'center'; renderTidy(); });
+  if (selSource) selSource.addEventListener('change', () => { loadData(); });
   if (chkGloss) chkGloss.addEventListener('change', ()=> {
     state.showGloss = !!chkGloss.checked;
     // 토글 직후 gloss 데이터가 하나도 없으면(경량 모드 가정) 상세 포함으로 재요청
@@ -406,16 +409,34 @@
   async function loadData() {
     const book = elBook.value || 'genesis';
     const chapter = elChapter.value || 1;
-    // 경량 모드로 우선 요청 (lite=1) — 캐시 사용
-    const url1 = `/api/tree?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}&lite=1`;
-    let r1 = await fetchJsonCached(url1).catch(()=>null);
+    const sourcePref = selSource ? (selSource.value || '') : '';
+    const startTs = performance.now();
+    if (elLoadStatus){ elLoadStatus.textContent = '불러오는 중…'; elLoadStatus.className = 'status'; }
+    let r1 = null;
+    try {
+      // 경량 모드(lite=1) 기본. 소스가 지정된 경우에는 강제 사용
+      if (sourcePref === 'tf'){
+        const url = `/api/tree?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}&source=tf&lite=1`;
+        r1 = await fetchJsonCached(url).catch(()=>null);
+      } else if (sourcePref === 'ctt'){
+        const url = `/api/tree?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}&source=ctt&lite=1`;
+        r1 = await fetchJsonCached(url).catch(()=>null);
+      } else {
+        const url1 = `/api/tree?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}&lite=1`;
+        r1 = await fetchJsonCached(url1).catch(()=>null);
+        if (!r1){
+          const url2 = `/api/tree?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}&source=ctt&lite=1`;
+          r1 = await fetchJsonCached(url2).catch(()=>null);
+        }
+      }
+    } catch(e){ /* handled below */ }
     if (!r1){
-      const url2 = `/api/tree?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}&source=ctt&lite=1`;
-      r1 = await fetchJsonCached(url2).catch(()=>null);
-      if (!r1){ alert('데이터 로드 실패'); return; }
+      if (elLoadStatus){ elLoadStatus.textContent = '로드 실패'; elLoadStatus.className = 'status err'; }
+      alert('데이터 로드 실패');
+      return;
     }
     state.data = r1.json;
-    state.source = (state.data && state.data.source) ? state.data.source : (url1.includes('source=ctt') ? 'ctt' : 'tf');
+    state.source = (state.data && state.data.source) ? state.data.source : (sourcePref || 'tf');
     state.collapsed.clear();
     // 깊이 슬라이더 최대값/초기값 설정 (트리 높이 기반)
     try {
@@ -429,6 +450,12 @@
       recomputeCollapsedToDepth();
     } catch(e) { /* ignore */ }
     render();
+    if (elLoadStatus){
+      const ms = Math.max(0, performance.now() - startTs).toFixed(0);
+      const src = state.source ? state.source.toUpperCase() : '';
+      elLoadStatus.textContent = `${src} ${ms}ms`;
+      elLoadStatus.className = 'status ok';
+    }
     // Ensure resizer visibility matches panel state on first load
     if (detailsResizer){ detailsResizer.classList.toggle('visible', !!state.showDetails); }
   }
@@ -445,7 +472,9 @@
     try{
       const book = elBook.value || 'genesis';
       const chapter = elChapter.value || 1;
-      const url = `/api/tree?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}&lite=0`;
+      const sourcePref = selSource ? (selSource.value || '') : '';
+      const src = sourcePref ? `&source=${encodeURIComponent(sourcePref)}` : '';
+      const url = `/api/tree?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}${src}&lite=0`;
       const r = await fetchJsonCached(url);
       state.data = r.json;
       state.source = (state.data && state.data.source) ? state.data.source : state.source;

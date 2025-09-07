@@ -32,6 +32,15 @@
         <button id="viewList">Indented List</button>
       </div>
 
+      <label>
+        Source
+        <select id="sourceSel">
+          <option value="">Auto</option>
+          <option value="tf">TF</option>
+          <option value="ctt">CTT</option>
+        </select>
+      </label>
+
       <div id="orientWrap">
         <label>Orientation
           <select id="orientation">
@@ -68,6 +77,7 @@
         <input id="toggleGlossKo" type="checkbox" /> 한글 Gloss
       </label>
       <small id="glossStatus" class="status"></small>
+      <small id="loadStatus" class="status"></small>
       <label>
         <input id="toggleLegend" type="checkbox" /> 유형 안내
       </label>

@@ -143,6 +143,12 @@ main {
 .badge { display: inline-block; padding: 1px 4px; margin-left: 4px; border-radius: 4px; background: #eef2ff; color: #3730a3; font-size: 11px; }
 .badge + .badge { margin-left: 3px; }
 
+/* 상단 상태 표시 */
+.status { margin-left: 8px; font-size: 12px; color: #444; }
+.status.ok { color: #16a34a; }
+.status.warn { color: #b45309; }
+.status.err { color: #b91c1c; }
+
 /* (상세 패널 스타일 제거) */
 
 ul.indented { list-style: none; padding-left: 0; margin: 0; }
