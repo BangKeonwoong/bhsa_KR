@@ -32,6 +32,8 @@ cd bhsa_KR
 PowerShell> .\setup_windows.ps1 -AutoInstall
 # 또는 환경변수로
 PowerShell> $env:AUTO_INSTALL='1'; .\setup_windows.ps1
+# 실행 정책 오류가 있으면 .bat 래퍼 사용
+CMD> setup_windows.bat -AutoInstall
 ```
 
 3) 브라우저 열림 확인: `http://127.0.0.1:5001/`
