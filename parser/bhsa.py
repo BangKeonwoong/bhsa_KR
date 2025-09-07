@@ -1,4 +1,11 @@
 from __future__ import annotations
+"""BHSA(Text‑Fabric) 데이터 접근 유틸리티.
+
+주요 기능
+- 로컬 BHSA 데이터 유무 탐지 및 gloss 기능 확인
+- 절/구절 토큰과 gloss 조회, ASCII→히브리 매핑 보조
+- clause/clause_atom 기반 트리 생성(TF mother 엣지) 및 세그먼트 분해
+"""
 from functools import lru_cache
 from typing import Dict, List, Tuple, Any
 import json

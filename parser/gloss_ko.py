@@ -1,4 +1,11 @@
 from __future__ import annotations
+"""영어 gloss → 한국어 gloss 매핑 로더.
+
+CSV 규격
+- 1열: 영어 gloss
+- 6열: 한국어 gloss
+환경변수 `GLOSS_KO_CSV`로 경로를 지정할 수 있으며, 지정이 없으면 data/gloss_ko.csv 등을 탐색합니다.
+"""
 import csv
 import os
 import re

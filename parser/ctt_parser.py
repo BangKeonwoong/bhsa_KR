@@ -1,4 +1,11 @@
 from __future__ import annotations
+"""CTT 파일을 간단 규칙으로 파싱해 뷰어 트리(JSON 유사 딕셔너리)로 변환하는 모듈.
+
+핵심 공개 함수
+- parse_ctt(file_path, book_label, title): 단일 CTT 파일을 트리로 변환
+- parse_ctt_cached(file_path, book_label, title): 결과를 캐시해 반복 호출 최적화
+- enumerate_ctt_ctypes(base_dir): 로컬 CTT 전체를 스캔하여 ctype 빈도 집계
+"""
 import os
 import re
 import json
