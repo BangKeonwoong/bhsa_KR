@@ -26,9 +26,9 @@ if (-not $python) {
   if (Test-Path $embedPy) {
     $python = $embedPy
     $useEmbedded = $true
-    Write-Host "[CTT Viewer] System Python 미발견. 내장 Python 사용: $python"
+    Write-Host "[CTT Viewer] System Python not found. Using embedded Python: $python"
   } else {
-    Write-Host "[CTT Viewer] Python3를 찾을 수 없습니다. 설치 후 다시 실행하세요."
+    Write-Host "[CTT Viewer] Python 3 not found. Please install Python 3 and retry."
     exit 1
   }
 } else {
@@ -85,7 +85,7 @@ function Ensure-Pip {
 }
 if ($useEmbedded) {
   # Install pip into embedded via get-pip, best-effort
-  Write-Host "[CTT Viewer] Embedded Python용 pip 준비"
+  Write-Host "[CTT Viewer] Prepare pip for embedded Python"
   try {
     & $python -m pip --version | Out-Null
   } catch {
@@ -152,7 +152,7 @@ $LocalTf = Join-Path $PSScriptRoot 'data\text-fabric-data'
 $UserTfBhsa = Join-Path $env:USERPROFILE 'text-fabric-data\etcbc\bhsa'
 $LocalBhsa = Join-Path $LocalTf 'etcbc\bhsa'
 if (-not (Test-Path $LocalBhsa) -and (Test-Path $UserTfBhsa)) {
-  Write-Host "[CTT Viewer] 로컬 TF 데이터가 없어 사용자 캐시에서 복사합니다."
+  Write-Host "[CTT Viewer] Copying TF data from user cache into project (first run)"
   New-Item -ItemType Directory -Force -Path (Split-Path $LocalBhsa) | Out-Null
   try { Copy-Item -Recurse -Force -Path $UserTfBhsa -Destination (Split-Path $LocalBhsa) } catch {}
 }
@@ -177,7 +177,7 @@ if (-not $env:GLOSS_KO_CSV) {
     if ($hit) {
       Copy-Item -Path $hit.FullName -Destination $bundled -Force
       $env:GLOSS_KO_CSV = $bundled
-      Write-Host "[CTT Viewer] 한글 gloss 파일 복사: $($hit.FullName) -> $bundled"
+      Write-Host "[CTT Viewer] Copy gloss CSV: $($hit.FullName) -> $bundled"
     }
   }
 }
