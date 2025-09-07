@@ -1,0 +1,10 @@
+[submodule "data/bhsa"]
+    path = data/bhsa
+    url = https://github.com/ETCBC/bhsa.git
+    branch = master
+
+[submodule "data/text-fabric-data/etcbc/bhsa"]
+    path = data/text-fabric-data/etcbc/bhsa
+    url = https://github.com/ETCBC/bhsa.git
+    branch = master
+
