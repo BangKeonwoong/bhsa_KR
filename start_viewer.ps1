@@ -108,13 +108,7 @@ if (Test-Path $req) {
     # Quick module check to skip pip when already satisfied
     $importOk = $false
     try {
-      & $venvPython -c "import importlib,sys; ok=True
-for m in ('flask','tf.fabric'):
-  try:
-    importlib.import_module(m)
-  except Exception:
-    ok=False; break
-import sys; sys.exit(0 if ok else 1)" 2>$null
+      & $venvPython -c "import importlib; importlib.import_module('flask'); importlib.import_module('tf.fabric')" 2>$null
       if ($LASTEXITCODE -eq 0) { $importOk = $true }
     } catch {}
     if ($importOk) {
