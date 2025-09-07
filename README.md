@@ -211,6 +211,19 @@ PY
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
+## 릴리즈(태그 기반)
+태그 `v*`를 푸시하면 GitHub Actions가 자동으로 릴리즈를 생성합니다.
+
+1) 버전 업데이트: `pyproject.toml`의 `version`
+2) `CHANGELOG.md` 갱신
+3) 커밋/푸시 후 태그 생성/푸시
+```
+git commit -am "Release: bump to vX.Y.Z"
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git push origin main --tags
+```
+4) 릴리즈 확인: GitHub → Releases (자동 릴리즈 노트 생성)
+
 ## 참고
 - 최초 실행 시 로컬 BHSA 데이터가 없으면 `run.sh`/`start_viewer.ps1`가 사용자 캐시(`~/text-fabric-data`)에서 복사 시도합니다.
 - 대용량 데이터로 인해 일부 경로는 서브모듈로 관리됩니다.
