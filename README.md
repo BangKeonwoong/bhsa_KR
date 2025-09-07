@@ -73,12 +73,6 @@ docker run --rm -it \
   ```bash
   git submodule update --init --recursive
   ```
-- 빠른(얕은) 다운로드로 용량/시간 절약(네트워크 여건에 따라 권장):
-  ```bash
-  git submodule update --init --depth 1 --recommend-shallow --recursive
-  # 이후 업데이트 시도 시에도 동일하게 얕게 유지하려면 아래처럼 실행
-  git submodule update --remote --merge --depth 1 --recommend-shallow
-  ```
 - 서브모듈 갱신(최신 BHSA 반영):
   ```bash
   git submodule update --remote --merge
@@ -90,7 +84,29 @@ docker run --rm -it \
   ```bash
   ls -1 data/text-fabric-data/etcbc/bhsa/tf
   ```
-- 주의(용량): 전체 히스토리를 포함한 서브모듈은 수백 MB 이상이 될 수 있습니다. 얕은 클론(`--depth 1`)을 사용하면 속도/용량을 줄일 수 있습니다.
+- 주의(용량): 전체 히스토리를 포함한 서브모듈은 수백 MB 이상이 될 수 있습니다.
+
+## 설치 순서(서브모듈 포함, TF 탑재 상태 보장)
+아래 순서를 따르면 Text‑Fabric BHSA가 로컬에 탑재된 상태로 바로 실행됩니다.
+
+1) 레포 클론(서브모듈 포함 필수)
+```bash
+git clone --recurse-submodules https://github.com/BangKeonwoong/bhsa_KR.git
+cd bhsa_KR
+```
+
+2) 실행 스크립트로 의존성/환경 준비 및 서버 구동
+- macOS/Linux: `./run.sh`
+- Windows(PowerShell): `./start_viewer.ps1`
+
+3) 확인(브라우저/상태 API)
+- 브라우저: `http://127.0.0.1:5001/` (상단에 “TF gloss 사용 가능” 표시)
+- API: `curl http://127.0.0.1:5001/api/tf/status` → `{"has_local_bhsa": true, "has_gloss": true}`
+
+참고: 만약 서브모듈 없이 클론했다면 아래 한 번만 실행 후 다시 2단계로 진행하세요.
+```bash
+git submodule update --init --recursive
+```
 
 ### 대안: Text‑Fabric가 자동으로 내려받도록 사용
 - 로컬에 BHSA가 없을 경우 Text‑Fabric가 사용자 캐시(`~/text-fabric-data`)로 내려받을 수 있습니다. 이 레포의 실행 스크립트(run.sh/start_viewer.ps1)는 사용자 캐시에서 `data/text-fabric-data`로 복사 시도를 합니다.
