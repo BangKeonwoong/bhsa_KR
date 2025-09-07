@@ -1,14 +1,19 @@
 openapi: 3.0.3
 info:
   title: CTT Viewer API
-  version: "1.0.0"
+  version: "1.1.0"
   description: |
-    CTT 파일과 BHSA(Text‑Fabric) 데이터를 탐색하는 API.
+    CTT 파일과 BHSA(Text‑Fabric) 데이터를 트리 형태로 탐색하는 API.
 servers:
   - url: /
+tags:
+  - name: system
+  - name: content
+  - name: tf
 paths:
   /healthz:
     get:
+      tags: [system]
       summary: Health check
       responses:
         '200':
@@ -20,8 +25,10 @@ paths:
                 properties:
                   status:
                     type: string
+                example: { status: ok }
   /api/version:
     get:
+      tags: [system]
       summary: 버전 정보 조회
       responses:
         '200':
@@ -29,12 +36,13 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  version: { type: string }
-                  git_sha: { type: string }
+                $ref: '#/components/schemas/VersionInfo'
+              examples:
+                sample:
+                  value: { version: "ce91625", git_sha: "ce91625" }
   /api/books:
     get:
+      tags: [content]
       summary: 책 목록
       responses:
         '200':
@@ -44,12 +52,10 @@ paths:
               schema:
                 type: array
                 items:
-                  type: object
-                  properties:
-                    code: { type: string }
-                    name: { type: string }
+                  $ref: '#/components/schemas/BookItem'
   /api/books/chapters:
     get:
+      tags: [content]
       summary: 책별 장 개수
       responses:
         '200':
@@ -59,19 +65,17 @@ paths:
               schema:
                 type: array
                 items:
-                  type: object
-                  properties:
-                    code: { type: string }
-                    name: { type: string }
-                    chapters: { type: integer }
+                  $ref: '#/components/schemas/BookChaptersItem'
   /api/knt/verse:
     get:
+      tags: [content]
       summary: KNT 구절 텍스트
       parameters:
         - in: query
           name: book
           schema: { type: string }
           required: true
+          description: 3-letter 라벨 또는 전체 영문명
         - in: query
           name: chapter
           schema: { type: integer }
@@ -86,15 +90,16 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  book_label: { type: string }
-                  chapter: { type: integer }
-                  verse: { type: integer }
-                  text: { type: string }
-        '404': { description: Not found }
+                $ref: '#/components/schemas/KNTVerseResponse'
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/tf/status:
     get:
+      tags: [tf]
       summary: BHSA/Gloss 가용성
       responses:
         '200':
@@ -102,12 +107,10 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  has_local_bhsa: { type: boolean }
-                  has_gloss: { type: boolean }
+                $ref: '#/components/schemas/TFStatus'
   /api/tree:
     get:
+      tags: [content]
       summary: 트리 데이터 조회(CTT 또는 TF)
       parameters:
         - in: query
@@ -136,9 +139,10 @@ paths:
           content:
             application/json:
               schema:
-                type: object
+                $ref: '#/components/schemas/TreeResponse'
   /api/tf/phrases:
     get:
+      tags: [tf]
       summary: TF 구(phrase/phrase_atom) 분해
       parameters:
         - in: query
@@ -149,10 +153,21 @@ paths:
           name: level
           schema: { type: string, enum: [phrase, phrase_atom] }
       responses:
-        '200': { description: OK }
-        '503': { description: BHSA 데이터 없음 }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TFPhrasesResponse'
+        '503':
+          description: BHSA 데이터 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/tf/node:
     get:
+      tags: [tf]
       summary: TF 노드 상세
       parameters:
         - in: query
@@ -160,10 +175,21 @@ paths:
           schema: { type: integer }
           required: true
       responses:
-        '200': { description: OK }
-        '503': { description: BHSA 데이터 없음 }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TFNodeDetails'
+        '503':
+          description: BHSA 데이터 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/types:
     get:
+      tags: [content]
       summary: 절 유형 통계(CTT 또는 TF)
       parameters:
         - in: query
@@ -176,11 +202,154 @@ paths:
           name: max_chapters
           schema: { type: integer }
       responses:
-        '200': { description: OK }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TypesResponse'
   /api/gloss/status:
     get:
+      tags: [content]
       summary: 한글 gloss 매핑 상태
       responses:
-        '200': { description: OK }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlossStatus'
 components:
-  securitySchemes: {}
+  schemas:
+    VersionInfo:
+      type: object
+      properties:
+        version: { type: string }
+        git_sha: { type: string }
+    BookItem:
+      type: object
+      properties:
+        code: { type: string, example: GEN }
+        name: { type: string, example: Genesis }
+    BookChaptersItem:
+      type: object
+      properties:
+        code: { type: string, example: GEN }
+        name: { type: string, example: Genesis }
+        chapters: { type: integer, example: 50 }
+    KNTVerseResponse:
+      type: object
+      properties:
+        book_label: { type: string, example: GEN }
+        chapter: { type: integer, example: 1 }
+        verse: { type: integer, example: 1 }
+        text: { type: string, example: "태초에 하나님이 천지를 창조하시니라" }
+    TFStatus:
+      type: object
+      properties:
+        has_local_bhsa: { type: boolean }
+        has_gloss: { type: boolean }
+    Token:
+      type: object
+      properties:
+        w: { type: string, description: 표면형 }
+        wid: { type: integer, nullable: true }
+        gloss: { type: string, nullable: true }
+        gloss_ko: { type: string, nullable: true }
+        sp: { type: string, nullable: true }
+        ps: { type: string, nullable: true }
+        nu: { type: string, nullable: true }
+        gn: { type: string, nullable: true }
+        st: { type: string, nullable: true }
+        vs: { type: string, nullable: true }
+        vt: { type: string, nullable: true }
+    TreeNode:
+      type: object
+      properties:
+        id: { oneOf: [ {type: string}, {type: integer} ] }
+        name: { type: string }
+        verse: { type: string }
+        pn: { type: string }
+        ctype: { type: string }
+        text: { type: string }
+        text_he: { type: string }
+        text_type: { type: string, enum: [N, D, Q], nullable: true }
+        rela: { type: string, nullable: true }
+        funcs: { type: array, items: { type: string } }
+        tokens: { type: array, items: { $ref: '#/components/schemas/Token' } }
+        gloss: { type: string, nullable: true }
+        gloss_ko: { type: string, nullable: true }
+        qBlockId: { type: integer, nullable: true }
+        qDepth: { type: integer, nullable: true }
+        children:
+          type: array
+          items: { $ref: '#/components/schemas/TreeNode' }
+    TreeResponse:
+      type: object
+      properties:
+        id: { type: string, example: root }
+        name: { type: string, example: Genesis 1 }
+        source: { type: string, enum: [ctt, tf] }
+        children:
+          type: array
+          items: { $ref: '#/components/schemas/TreeNode' }
+    TypesItem:
+      type: object
+      properties:
+        type: { type: string }
+        count: { type: integer }
+    TypesResponse:
+      type: object
+      properties:
+        source: { type: string, enum: [ctt, tf] }
+        book: { type: string, nullable: true }
+        types:
+          type: array
+          items: { $ref: '#/components/schemas/TypesItem' }
+    PhraseSegment:
+      type: object
+      properties:
+        text: { type: string }
+        gloss_ko: { type: string, nullable: true }
+        function: { type: string, nullable: true }
+        cat: { type: string }
+        cat_ko: { type: string }
+        tokens:
+          type: array
+          items: { $ref: '#/components/schemas/Token' }
+    TFPhrasesResponse:
+      type: object
+      properties:
+        node_id: { type: integer }
+        level: { type: string, enum: [phrase, phrase_atom] }
+        segments:
+          type: array
+          items: { $ref: '#/components/schemas/PhraseSegment' }
+    TFNodeDetails:
+      type: object
+      properties:
+        id: { type: integer }
+        text: { type: string }
+        tokens:
+          type: array
+          items: { $ref: '#/components/schemas/Token' }
+        gloss: { type: string, nullable: true }
+        gloss_ko: { type: string, nullable: true }
+        funcs: { type: array, items: { type: string } }
+        rela: { type: string, nullable: true }
+        text_type: { type: string, enum: [N, D, Q], nullable: true }
+    GlossStatus:
+      type: object
+      properties:
+        path: { type: string, nullable: true }
+        rows_total: { type: integer }
+        mapped: { type: integer }
+        skipped_short: { type: integer }
+        message: { type: string }
+    ErrorResponse:
+      type: object
+      properties:
+        error: { type: string }
+        message: { type: string }
+        path: { type: string }
+        method: { type: string }

@@ -1,0 +1,16 @@
+services:
+  web:
+    build: .
+    image: ctt-viewer:local
+    ports:
+      - "5001:5001"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 5001
+      ENABLE_COMPRESSION: "1"
+      TF_LOCAL_DIR: /app/data/text-fabric-data
+      TF_LOCATIONS: /app:/app/data/text-fabric-data
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+

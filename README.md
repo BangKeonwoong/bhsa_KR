@@ -43,6 +43,21 @@ docker run --rm -it \
 - `TF_LOCATIONS=/app:/app/data/text-fabric-data` — 탐색 경로 우선순위 제어
 - `GLOSS_KO_CSV=/app/data/gloss_ko.csv` — 영어→한글 gloss CSV 경로
 
+### Docker Compose
+`compose.yaml`을 제공하여 더 간단히 실행할 수 있습니다.
+
+1) 빌드: `docker compose build`
+
+2) 실행: `docker compose up -d`
+
+3) 종료: `docker compose down`
+
+기본 설정은 포트 5001 노출과 `./data` 마운트를 포함합니다. 환경변수는 `compose.yaml`의 `environment` 섹션에서 조정하세요.
+
+## API 문서
+- OpenAPI 스펙: `/openapi.yaml`
+- 문서 UI(Redoc): `/api/docs`
+
 
 ## 데이터
 - CTT: `data/ctt/<book>/<chapter>/*.CTT`
