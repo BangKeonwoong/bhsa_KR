@@ -19,6 +19,31 @@
   - 필요 시 환경변수로 지정: `STATIC_DIR=/path/to/static`
   - 폰트/데이터도 지정 가능: `FONT_DIR`, `DATA_CTT_DIR`, `KNT_DIR`
 
+## Docker 실행
+이미지 빌드/실행 예시는 다음과 같습니다. 대용량 데이터(`data/`)는 이미지에 포함하지 않고 런타임에 마운트하는 것을 권장합니다.
+
+1) 빌드
+```
+docker build -t ctt-viewer:local .
+```
+
+2) 실행 (호스트의 `./data`를 컨테이너 `/app/data`로 마운트)
+```
+docker run --rm -it \
+  -p 5001:5001 \
+  -e HOST=0.0.0.0 -e PORT=5001 \
+  -e ENABLE_COMPRESSION=1 \
+  -v $(pwd)/data:/app/data \
+  ctt-viewer:local
+```
+
+선택 환경변수
+- `STATIC_DIR=/app/static` (기본값) — 빌드에 포함된 정적 자원 사용
+- `TF_LOCAL_DIR=/app/data/text-fabric-data` — Text‑Fabric 데이터 루트 힌트
+- `TF_LOCATIONS=/app:/app/data/text-fabric-data` — 탐색 경로 우선순위 제어
+- `GLOSS_KO_CSV=/app/data/gloss_ko.csv` — 영어→한글 gloss CSV 경로
+
+
 ## 데이터
 - CTT: `data/ctt/<book>/<chapter>/*.CTT`
 - BHSA: `data/text-fabric-data/etcbc/bhsa/tf/<version>/` (서브모듈)

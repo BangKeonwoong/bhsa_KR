@@ -1,0 +1,29 @@
+# VCS and local files
+.git
+.gitignore
+.DS_Store
+__pycache__
+.venv
+venv
+ENV
+*.log
+
+# Python build artifacts
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+dist
+build
+pip-wheel-metadata
+
+# Node/npm cache (if any)
+node_modules
+
+# Large data (mount at runtime)
+data
+
+# OS/editor
+.vscode
+.idea
+
