@@ -3,6 +3,11 @@ import logging
 import time
 from flask import g, request, current_app
 import uuid
+import gzip
+try:
+    import brotli  # type: ignore
+except Exception:  # pragma: no cover
+    brotli = None  # type: ignore
 
 
 def init_request_logging(app) -> None:
@@ -83,4 +88,69 @@ def init_cors(app) -> None:
             resp.headers['Access-Control-Allow-Methods'] = allow_methods
             resp.headers['Access-Control-Allow-Headers'] = allow_headers
         finally:
+            return resp
+
+
+def _should_compress(resp) -> bool:
+    if not bool(current_app.config.get('ENABLE_COMPRESSION', True)):
+        return False
+    try:
+        if request.method not in ('GET','HEAD'):
+            return False
+    except Exception:
+        return False
+    # skip already encoded or tiny
+    if resp.headers.get('Content-Encoding'):
+        return False
+    min_size = int(current_app.config.get('COMPRESS_MIN_SIZE', 1024))
+    try:
+        if resp.direct_passthrough:  # streaming
+            return False
+    except Exception:
+        pass
+    data = resp.get_data()
+    if not data or len(data) < max(0, min_size):
+        return False
+    # type filter
+    mt = (resp.mimetype or '')
+    mlist = str(current_app.config.get('COMPRESS_MIMETYPES', 'application/json')).split(',')
+    mlist = [m.strip() for m in mlist if m.strip()]
+    ok = any(mt == m or (m.endswith('/*') and mt.startswith(m[:-1])) or (m == 'application/json' and mt.startswith('application/json')) for m in mlist)
+    return ok
+
+
+def init_compression(app) -> None:
+    @app.after_request
+    def _compress(resp):  # type: ignore[override]
+        try:
+            if not _should_compress(resp):
+                return resp
+            ae = request.headers.get('Accept-Encoding', '')
+            pick_br = ('br' in ae) and (brotli is not None)
+            pick_gz = ('gzip' in ae)
+            data = resp.get_data()
+            if pick_br:
+                try:
+                    cdata = brotli.compress(data)  # type: ignore[attr-defined]
+                    resp.set_data(cdata)
+                    resp.headers['Content-Encoding'] = 'br'
+                except Exception:
+                    # fallback to gzip
+                    pick_br = False
+            if (not pick_br) and pick_gz:
+                level = int(current_app.config.get('GZIP_LEVEL', 6))
+                cdata = gzip.compress(data, compresslevel=max(1, min(9, level)))
+                resp.set_data(cdata)
+                resp.headers['Content-Encoding'] = 'gzip'
+            # Add Vary header
+            vary = resp.headers.get('Vary', '')
+            if 'Accept-Encoding' not in vary:
+                resp.headers['Vary'] = (vary + ', Accept-Encoding').strip(', ')
+            # Update Content-Length
+            try:
+                resp.headers['Content-Length'] = str(len(resp.get_data()))
+            except Exception:
+                pass
+            return resp
+        except Exception:
             return resp

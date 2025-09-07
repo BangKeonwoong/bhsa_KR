@@ -5,7 +5,7 @@ from flask import Flask
 from .logging_config import setup_logging
 from .config import BaseConfig, apply_env_overrides
 from .errors import register_error_handlers
-from .middleware import init_request_logging, init_request_id, init_cors
+from .middleware import init_request_logging, init_request_id, init_cors, init_compression
 from .paths import static_dir as _static_dir
 
 
@@ -36,6 +36,7 @@ def create_app() -> Flask:
     init_request_id(app)
     init_request_logging(app)
     init_cors(app)
+    init_compression(app)
     register_error_handlers(app)
 
     # Register routes

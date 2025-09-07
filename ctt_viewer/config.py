@@ -33,8 +33,38 @@ class BaseConfig:
     TREE_FULL_MAX_AGE: int = int(os.environ.get("TREE_FULL_MAX_AGE", "120"))
     TREE_FULL_SWR: int = int(os.environ.get("TREE_FULL_SWR", "60"))
 
+    # 응답 압축
+    ENABLE_COMPRESSION: bool = bool(int(os.environ.get("ENABLE_COMPRESSION", "1")))
+    COMPRESS_MIN_SIZE: int = int(os.environ.get("COMPRESS_MIN_SIZE", "1024"))
+    GZIP_LEVEL: int = int(os.environ.get("GZIP_LEVEL", "6"))
+    # 쉼표 구분 mimetype 목록 (접두 일치 허용)
+    COMPRESS_MIMETYPES: str = os.environ.get("COMPRESS_MIMETYPES", "application/json")
+
+
+def _set_if_env(app, key: str, cast):
+    import os as _os
+    if key in _os.environ:
+        try:
+            app.config[key] = cast(_os.environ.get(key))
+        except Exception:
+            try:
+                app.config[key] = _os.environ.get(key)
+            except Exception:
+                pass
+
 
 def apply_env_overrides(app) -> None:
-    """Apply simple environment overrides that may affect Flask behavior."""
-    # No-op for now; reserved for future flags
-    pass
+    """Apply environment overrides at runtime for easier testing/config."""
+    for k in (
+        'CACHE_MAX_AGE','CACHE_SWR','TREE_LITE_MAX_AGE','TREE_LITE_SWR',
+        'TREE_FULL_MAX_AGE','TREE_FULL_SWR','COMPRESS_MIN_SIZE','GZIP_LEVEL'
+    ):
+        _set_if_env(app, k, lambda v: int(str(v)))
+    for k in (
+        'ENABLE_CORS','ACCESS_LOG','ENABLE_COMPRESSION'
+    ):
+        _set_if_env(app, k, lambda v: bool(int(str(v))))
+    for k in (
+        'REQUEST_ID_HEADER','CORS_ALLOW_ORIGIN','CORS_ALLOW_METHODS','CORS_ALLOW_HEADERS','COMPRESS_MIMETYPES'
+    ):
+        _set_if_env(app, k, str)

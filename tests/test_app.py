@@ -3,6 +3,9 @@ import json
 import unittest
 
 from ctt_viewer import create_app
+import os
+from importlib import reload
+import ctt_viewer.config as config_mod
 
 
 class AppRoutesTest(unittest.TestCase):
@@ -52,6 +55,18 @@ class AppRoutesTest(unittest.TestCase):
         self.assertEqual(rv.status_code, 200)
         data = rv.get_json()
         self.assertIn('version', data)
+
+    def test_json_gzip_compression(self):
+        # 새 앱을 만들어 압축 설정을 강제
+        os.environ['ENABLE_COMPRESSION'] = '1'
+        os.environ['COMPRESS_MIN_SIZE'] = '1'
+        # BaseConfig는 import 시 환경을 읽지만, apply_env_overrides가 런타임에 반영함
+        app2 = create_app()
+        client2 = app2.test_client()
+        rv = client2.get('/api/types?source=ctt', headers={'Accept-Encoding': 'gzip'})
+        self.assertEqual(rv.status_code, 200)
+        enc = rv.headers.get('Content-Encoding', '')
+        self.assertEqual(enc, 'gzip')
 
     def test_openapi_yaml(self):
         rv = self.client.get('/openapi.yaml')
