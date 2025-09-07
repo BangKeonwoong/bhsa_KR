@@ -40,6 +40,25 @@
   const spacingRange = document.getElementById('spacingRange');
   const spacingValue = document.getElementById('spacingValue');
   const elLoadStatus = document.getElementById('loadStatus');
+  const spinOverlay = document.getElementById('spinnerOverlay');
+  const toastEl = document.getElementById('toast');
+
+  // --- Local storage helpers ---
+  const LS_PREFIX = 'cttViewer:';
+  function setPref(k, v){ try { localStorage.setItem(LS_PREFIX + k, String(v)); } catch(e){} }
+  function getPref(k, defVal){ try { const v = localStorage.getItem(LS_PREFIX + k); return (v===null||v===undefined)? defVal : v; } catch(e){ return defVal; } }
+
+  // Spinner + Toast
+  let _loadCount = 0;
+  function showSpinner(){ try { _loadCount++; if (spinOverlay) spinOverlay.classList.add('visible'); } catch(e){} }
+  function hideSpinner(){ try { _loadCount=Math.max(0,_loadCount-1); if (_loadCount===0 && spinOverlay) spinOverlay.classList.remove('visible'); } catch(e){} }
+  function showToast(msg, level){
+    if (!toastEl) return;
+    toastEl.textContent = String(msg||'');
+    toastEl.className = 'show ' + (level||'');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(()=>{ toastEl.className=''; }, 2400);
+  }
 
   // --- URL state helpers (deeplink) ---
   function getCurrentView(){ return tidyView.classList.contains('visible') ? 'tidy' : 'list'; }
@@ -86,6 +105,33 @@
       if (selOrient && q.orientation){ selOrient.value = q.orientation; }
       if (q.view === 'list'){ switchView('list'); } else { switchView('tidy'); }
     } catch(e) { /* ignore */ }
+  }
+
+  function applySavedPreferences(){
+    try {
+      const q = readQueryState();
+      if (!q.book){
+        const savedBook = getPref('book','');
+        if (savedBook){
+          const opt = Array.from(elBook.options).find(o => (o.value||'').toLowerCase() === String(savedBook).toLowerCase());
+          if (opt) elBook.value = opt.value;
+        }
+      }
+      if (!q.chapter){
+        const savedCh = parseInt(getPref('chapter','')||'0',10) || 0;
+        if (savedCh>0) elChapter.value = String(savedCh);
+      }
+      try { updateChapterMaxForBook(elBook.value); } catch(e){}
+      if (!q.source && selSource){ selSource.value = getPref('source',''); }
+      if (!q.orientation && selOrient){ selOrient.value = getPref('orientation','horizontal'); }
+      // toggles and sliders
+      try { if (chkGloss) chkGloss.checked = (getPref('gloss','')==='1'); } catch(e){}
+      try { if (chkGlossKo) chkGlossKo.checked = (getPref('glossKo','')==='1'); } catch(e){}
+      try { if (chkLegend) { chkLegend.checked = (getPref('legend','')==='1'); legendPanel.classList.toggle('visible', chkLegend.checked); } } catch(e){}
+      try { if (chkDetails) { chkDetails.checked = (getPref('details','')==='1'); detailsPanel.classList.toggle('visible', chkDetails.checked); if (detailsResizer) detailsResizer.classList.toggle('visible', chkDetails.checked); } } catch(e){}
+      try { const sp = parseInt(getPref('spacing','')||'0',10); if (sp && spacingRange) { spacingRange.value = String(sp); spacingValue.textContent = String(sp); state.spacing = sp; } } catch(e){}
+      try { const dp = parseInt(getPref('depth','')||''); if (!isNaN(dp) && depthRange) { depthRange.value = String(dp); depthValue.textContent = String(dp); state.depthLimit = dp; } } catch(e){}
+    } catch(e){}
   }
 
   elLoad.addEventListener('click', loadData);
@@ -135,9 +181,9 @@
   if (btnNextChap) btnNextChap.addEventListener('click', () => { navigateChapter(1); });
   btnTidy.addEventListener('click', () => { switchView('tidy'); updateUrlFromState(false); });
   btnList.addEventListener('click', () => { switchView('list'); updateUrlFromState(false); });
-  selOrient.addEventListener('change', () => { state.orientation = selOrient.value; updateUrlFromState(false); renderTidy(); });
+  selOrient.addEventListener('change', () => { state.orientation = selOrient.value; try { setPref('orientation', selOrient.value); } catch(e){} updateUrlFromState(false); renderTidy(); });
   if (selAnchorMode) selAnchorMode.addEventListener('change', () => { state.anchorMode = selAnchorMode.value || 'center'; renderTidy(); });
-  if (selSource) selSource.addEventListener('change', () => { updateUrlFromState(false); loadData(); });
+  if (selSource) selSource.addEventListener('change', () => { try { setPref('source', selSource.value||''); } catch(e){} updateUrlFromState(false); loadData(); });
   window.addEventListener('popstate', () => { applyInitialStateFromQuery(); loadData(); });
   if (chkGloss) chkGloss.addEventListener('change', ()=> {
     state.showGloss = !!chkGloss.checked;
@@ -217,12 +263,14 @@
     if (depthValue) depthValue.textContent = String(state.depthLimit);
     recomputeCollapsedToDepth();
     renderTidy();
+    try { setPref('depth', state.depthLimit|0); } catch(e){}
   });
   if (spacingRange) spacingRange.addEventListener('input', () => {
     const v = parseInt(spacingRange.value || '280', 10);
     state.spacing = isNaN(v) ? 280 : v;
     if (spacingValue) spacingValue.textContent = String(state.spacing);
     renderTidy();
+    try { setPref('spacing', state.spacing|0); } catch(e){}
   });
 
   // Load books dynamically if available, then data
@@ -232,7 +280,7 @@
   state.tidySegCache = new Map();
   const API_CACHE_TTL_MS = 30000; // 30s default
   const API_CACHE_MAX = 100; // simple LRU max size
-  initBooks().then(() => { applyInitialStateFromQuery(); updateUrlFromState(false); }).then(initTfStatus).then(loadData).catch(loadData);
+  initBooks().then(() => { applyInitialStateFromQuery(); applySavedPreferences(); updateUrlFromState(false); }).then(initTfStatus).then(loadData).catch(loadData);
 
   async function fetchJsonCached(url){
     const now = Date.now();
@@ -337,6 +385,7 @@
     if (bookVal) elBook.value = bookVal;
     if (chap) elChapter.value = String(chap);
     try { updateChapterMaxForBook(elBook.value); } catch(e){}
+    try { setPref('book', elBook.value||''); setPref('chapter', elChapter.value||''); } catch(e){}
     updateUrlFromState(false);
     loadData();
   }
@@ -461,6 +510,7 @@
     const sourcePref = selSource ? (selSource.value || '') : '';
     const startTs = performance.now();
     if (elLoadStatus){ elLoadStatus.textContent = '불러오는 중…'; elLoadStatus.className = 'status'; }
+    showSpinner();
     let r1 = null;
     try {
       // 경량 모드(lite=1) 기본. 소스가 지정된 경우에는 강제 사용
@@ -481,7 +531,8 @@
     } catch(e){ /* handled below */ }
     if (!r1){
       if (elLoadStatus){ elLoadStatus.textContent = '로드 실패'; elLoadStatus.className = 'status err'; }
-      alert('데이터 로드 실패');
+      showToast('데이터 로드 실패', 'err');
+      hideSpinner();
       return;
     }
     state.data = r1.json;
@@ -505,6 +556,8 @@
       elLoadStatus.textContent = `${src} ${ms}ms`;
       elLoadStatus.className = 'status ok';
     }
+    showToast('불러오기 완료', 'ok');
+    hideSpinner();
     // Ensure resizer visibility matches panel state on first load
     if (detailsResizer){ detailsResizer.classList.toggle('visible', !!state.showDetails); }
   }
@@ -524,11 +577,13 @@
       const sourcePref = selSource ? (selSource.value || '') : '';
       const src = sourcePref ? `&source=${encodeURIComponent(sourcePref)}` : '';
       const url = `/api/tree?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}${src}&lite=0`;
+      showSpinner();
       const r = await fetchJsonCached(url);
       state.data = r.json;
       state.source = (state.data && state.data.source) ? state.data.source : state.source;
       render();
-    }catch(e){ render(); }
+    }catch(e){ render(); showToast('상세 불러오기 실패', 'err'); }
+    finally { hideSpinner(); }
   }
 
   // --- Details resizer (drag to set height) ---

@@ -149,6 +149,19 @@ main {
 .status.warn { color: #b45309; }
 .status.err { color: #b91c1c; }
 
+/* Spinner overlay */
+#spinnerOverlay { position: fixed; inset: 0; background: rgba(255,255,255,0.65); display: none; align-items: center; justify-content: center; z-index: 1000; }
+#spinnerOverlay.visible { display: flex; }
+.spinner { width: 40px; height: 40px; border: 4px solid #e5e7eb; border-top-color: #2563eb; border-radius: 50%; animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Toast */
+#toast { position: fixed; right: 14px; bottom: 14px; background: #111827; color: white; padding: 10px 12px; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.18); z-index: 1100; opacity: 0; transform: translateY(12px); pointer-events: none; transition: opacity .2s ease, transform .2s ease; font-size: 13px; }
+#toast.show { opacity: 1; transform: translateY(0); }
+#toast.ok { background: #065f46; }
+#toast.warn { background: #92400e; }
+#toast.err { background: #7f1d1d; }
+
 /* (상세 패널 스타일 제거) */
 
 ul.indented { list-style: none; padding-left: 0; margin: 0; }
