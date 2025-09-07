@@ -26,7 +26,7 @@ jobs:
           cp -R static "$STAGE_W/"
           cp -R font "$STAGE_W/"
           cp -v app.py start_viewer.bat start_viewer.ps1 setup_windows.ps1 README-RUN-windows.txt "$STAGE_W/" || true
-          cp -v README.md CHANGELOG.md requirements.txt "$STAGE_W/"
+          cp -v README.md CHANGELOG.md requirements.txt FIRST-RUN-CHECKLIST.md "$STAGE_W/"
           mkdir -p "$STAGE_W/data/wheels"
           if [ -d data/ctt ]; then cp -R data/ctt "$STAGE_W/data/"; fi
           if [ -f data/gloss_ko.csv ]; then cp -v data/gloss_ko.csv "$STAGE_W/data/"; fi
@@ -41,7 +41,7 @@ jobs:
           cp -R static "$STAGE_M/"
           cp -R font "$STAGE_M/"
           cp -v app.py run.sh "Start Viewer.command" README-RUN-macOS.txt "$STAGE_M/" || true
-          cp -v README.md CHANGELOG.md requirements.txt "$STAGE_M/"
+          cp -v README.md CHANGELOG.md requirements.txt FIRST-RUN-CHECKLIST.md "$STAGE_M/"
           mkdir -p "$STAGE_M/data/wheels"
           if [ -d data/ctt ]; then cp -R data/ctt "$STAGE_M/data/"; fi
           if [ -f data/gloss_ko.csv ]; then cp -v data/gloss_ko.csv "$STAGE_M/data/"; fi

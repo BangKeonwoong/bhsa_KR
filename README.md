@@ -242,6 +242,10 @@ git push origin main --tags
 - macOS: 더블클릭 `Start Viewer.command` 또는 터미널에서 `./run.sh`
 - 주의: 릴리즈 ZIP에는 BHSA 서브모듈 데이터가 포함되지 않습니다. TF가 자동으로 사용자 캐시로 내려받거나, 개발용으로는 서브모듈 포함 클론을 권장합니다.
 
+### 첫 실행 체크리스트
+- 릴리즈 ZIP에는 `FIRST-RUN-CHECKLIST.md`가 포함되어 있습니다.
+- 주요 확인 사항(요약): Python 설치/의존성 설치, 방화벽/정책 우회, TF/BHSA 상태(`/api/tf/status`), 포트 충돌, 오프라인 설치(`data/wheels/`).
+
 ## 참고
 - 최초 실행 시 로컬 BHSA 데이터가 없으면 `run.sh`/`start_viewer.ps1`가 사용자 캐시(`~/text-fabric-data`)에서 복사 시도합니다.
 - 대용량 데이터로 인해 일부 경로는 서브모듈로 관리됩니다.
