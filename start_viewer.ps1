@@ -17,20 +17,54 @@ function Resolve-Python {
   throw "No Python interpreter found in PATH. Install Python 3 first."
 }
 
+function Get-ArchTag {
+  try {
+    if ([Environment]::Is64BitOperatingSystem) { return 'amd64' } else { return 'win32' }
+  } catch { return 'amd64' }
+}
+function Download-File($url, $dst) {
+  try {
+    Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $dst -TimeoutSec 60
+    return $true
+  } catch {
+    try {
+      $wc = New-Object System.Net.WebClient
+      $wc.DownloadFile($url, $dst)
+      return $true
+    } catch { return $false }
+  }
+}
+function Ensure-EmbeddedPython {
+  $embedDir = Join-Path $PSScriptRoot 'python-embed'
+  $embedExe = Join-Path $embedDir 'python.exe'
+  if (Test-Path $embedExe) { return $embedExe }
+  Write-Host "[CTT Viewer] Downloading Python embeddable (one-time)"
+  $ver = '3.11.8'
+  $arch = Get-ArchTag
+  $zip = Join-Path $PSScriptRoot "python-${ver}-embed-${arch}.zip"
+  $url = "https://www.python.org/ftp/python/${ver}/python-${ver}-embed-${arch}.zip"
+  if (-not (Download-File $url $zip)) {
+    Write-Host "[CTT Viewer] Failed to download Python embeddable. Please install Python 3 manually."
+    exit 1
+  }
+  try {
+    if (-not (Test-Path $embedDir)) { New-Item -ItemType Directory -Force -Path $embedDir | Out-Null }
+    Expand-Archive -LiteralPath $zip -DestinationPath $embedDir -Force
+  } catch {
+    Write-Host "[CTT Viewer] Failed to extract Python embeddable."
+    exit 1
+  } finally { try { Remove-Item -Force $zip } catch {} }
+  return $embedExe
+}
+
 $python = $null
 try { $python = Resolve-Python } catch { $python = $null }
 $useEmbedded = $false
 if (-not $python) {
-  # Fallback to embedded Python if present
-  $embedPy = Join-Path $PSScriptRoot 'python-embed\python.exe'
-  if (Test-Path $embedPy) {
-    $python = $embedPy
-    $useEmbedded = $true
-    Write-Host "[CTT Viewer] System Python not found. Using embedded Python: $python"
-  } else {
-    Write-Host "[CTT Viewer] Python 3 not found. Please install Python 3 and retry."
-    exit 1
-  }
+  $embedPy = Ensure-EmbeddedPython
+  $python = $embedPy
+  $useEmbedded = $true
+  Write-Host "[CTT Viewer] Using embedded Python: $python"
 } else {
   Write-Host "[CTT Viewer] Python: $python"
 }
