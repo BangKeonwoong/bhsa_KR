@@ -8,8 +8,57 @@
 - 실행:
   - macOS/Linux: `./run.sh` 또는 `python app.py`
   - Windows: `start_viewer.bat` 또는 PowerShell `./start_viewer.ps1`
-  - 모듈 실행: `python -m ctt_viewer`
+- 모듈 실행: `python -m ctt_viewer`
  - 클론 시 항상 서브모듈 포함 권장: `git clone --recurse-submodules <repo>`
+
+## 비개발자용 빠른 실행 (권장 순서)
+
+### Windows
+1) Git 설치 후 레포 클론(서브모듈 포함)
+```
+git clone --recurse-submodules https://github.com/BangKeonwoong/bhsa_KR.git
+cd bhsa_KR
+```
+2) 실행(권장):
+```
+ .\start_viewer.bat
+```
+- PowerShell 정책으로 `.ps1` 실행이 막히는 환경에서도 `.bat`가 자동으로 우회(-ExecutionPolicy Bypass).
+- Python이 없으면 자동으로 embeddable Python(3.11)을 다운로드/설정 후 진행합니다(최초 1회).
+
+3) 브라우저 열림 확인: `http://127.0.0.1:5001/`
+   - 상단 상태가 “TF gloss 사용 가능”이면 정상. 문제가 있으면 `Invoke-RestMethod http://127.0.0.1:5001/api/tf/status`로 확인.
+
+문제 해결(Tips)
+- “명령을 인식하지 못함”: PowerShell은 현재 폴더 실행에 `./` 또는 `.\`가 필요합니다. ` .\start_viewer.bat`처럼 실행하세요.
+- 실행 정책 오류: `start_viewer.bat`를 사용하거나, `powershell -NoProfile -ExecutionPolicy Bypass -File .\start_viewer.ps1`로 실행.
+- 방화벽 팝업: 허용해야 브라우저 접근이 가능합니다.
+- 오프라인(네트워크 제한): `data/wheels/` 폴더에 미리 `.whl` 파일(Flask, text-fabric 등)을 넣어두면 런처가 우선 사용합니다. 상세: `data/wheels/README.md` 참조.
+
+### macOS
+1) Git & Python 3 준비
+- Git이 없으면 Xcode Command Line Tools로 설치: `xcode-select --install`
+- Python 3이 없다면 Homebrew 설치 후: `brew install python`
+
+2) 레포 클론(서브모듈 포함)
+```
+git clone --recurse-submodules https://github.com/BangKeonwoong/bhsa_KR.git
+cd bhsa_KR
+```
+
+3) 실행
+```
+./run.sh
+```
+- 권한 문제 시: `chmod +x run.sh` 후 재실행
+- 최초 실행 시 venv 생성, pip로 의존성 설치, 사용자 캐시(`~/text-fabric-data`)에서 TF 데이터 복사 시도
+
+4) 브라우저: `http://127.0.0.1:5001/` → 상태 “TF gloss 사용 가능” 확인
+
+트러블슈팅
+- Python 미설치: `brew install python`
+- 포트 충돌: `PORT=5002 ./run.sh`처럼 다른 포트 지정
+- TF 데이터 미탑재: `/api/tf/status` 확인 후, `data/text-fabric-data/etcbc/bhsa/tf/<version>`에 파일이 있는지 점검
 
 ## 패키징/설치
 - 로컬 설치(개발):
