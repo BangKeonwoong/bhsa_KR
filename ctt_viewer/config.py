@@ -18,6 +18,15 @@ class BaseConfig:
     ACCESS_LOG: bool = bool(int(os.environ.get("ACCESS_LOG", "1")))
     ACCESS_LOG_SKIP: str = os.environ.get("ACCESS_LOG_SKIP", "/healthz")
 
+    # Request ID
+    REQUEST_ID_HEADER: str = os.environ.get("REQUEST_ID_HEADER", "X-Request-ID")
+
+    # CORS (simple built-in toggle)
+    ENABLE_CORS: bool = bool(int(os.environ.get("ENABLE_CORS", "0")))
+    CORS_ALLOW_ORIGIN: str = os.environ.get("CORS_ALLOW_ORIGIN", "*")
+    CORS_ALLOW_METHODS: str = os.environ.get("CORS_ALLOW_METHODS", "GET,OPTIONS")
+    CORS_ALLOW_HEADERS: str = os.environ.get("CORS_ALLOW_HEADERS", "Content-Type, If-None-Match, X-Requested-With, X-Request-ID")
+
 
 def apply_env_overrides(app) -> None:
     """Apply simple environment overrides that may affect Flask behavior."""

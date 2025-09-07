@@ -5,7 +5,7 @@ from flask import Flask
 from .logging_config import setup_logging
 from .config import BaseConfig, apply_env_overrides
 from .errors import register_error_handlers
-from .middleware import init_request_logging
+from .middleware import init_request_logging, init_request_id, init_cors
 
 
 def project_root() -> Path:
@@ -32,7 +32,9 @@ def create_app() -> Flask:
     apply_env_overrides(app)
 
     # Middlewares & error handlers
+    init_request_id(app)
     init_request_logging(app)
+    init_cors(app)
     register_error_handlers(app)
 
     # Register routes

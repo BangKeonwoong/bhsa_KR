@@ -21,6 +21,8 @@ class AppRoutesTest(unittest.TestCase):
         self.assertEqual(rv.status_code, 200)
         data = rv.get_json()
         self.assertEqual(data.get('status'), 'ok')
+        # Request ID header propagated
+        self.assertTrue(rv.headers.get('X-Request-ID'))
 
     def test_books(self):
         rv = self.client.get('/api/books')
@@ -44,6 +46,12 @@ class AppRoutesTest(unittest.TestCase):
         data = rv.get_json()
         self.assertIn('has_local_bhsa', data)
         self.assertIn('has_gloss', data)
+
+    def test_version(self):
+        rv = self.client.get('/api/version')
+        self.assertEqual(rv.status_code, 200)
+        data = rv.get_json()
+        self.assertIn('version', data)
 
     def test_gloss_status(self):
         rv = self.client.get('/api/gloss/status')

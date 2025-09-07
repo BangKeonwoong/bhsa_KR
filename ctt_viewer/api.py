@@ -465,3 +465,22 @@ def register_misc_routes(app, root: Path) -> None:
     @app.get("/healthz")
     def healthz():
         return jsonify({"status": "ok"})
+
+    @app.get("/api/version")
+    def api_version():
+        """간단한 빌드/버전 정보.
+
+        우선순위: 환경변수 APP_VERSION, GIT_SHA → git rev-parse → unknown
+        """
+        ver = os.environ.get('APP_VERSION') or ''
+        sha = os.environ.get('GIT_SHA') or ''
+        if not sha:
+            # best-effort 로컬 git 해시 조회
+            try:
+                import subprocess
+                sha = (subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=str(root))).decode().strip()
+            except Exception:
+                sha = ''
+        if not ver:
+            ver = sha or 'unknown'
+        return jsonify({ 'version': ver, 'git_sha': sha or 'unknown' })
