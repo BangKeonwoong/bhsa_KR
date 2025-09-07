@@ -86,6 +86,15 @@ fi
 if [ -z "${PY_IN_VENV:-}" ]; then PY_IN_VENV="python"; fi
 echo "[CTT Viewer] 사용 중인 Python: $PY_IN_VENV"
 
+# Ensure git submodules are initialized (always clone with submodules)
+if command -v git >/dev/null 2>&1 && [ -d .git ]; then
+  sm_status="$(git submodule status 2>/dev/null || true)"
+  if echo "$sm_status" | grep -E '^[\-]'; then
+    echo "[CTT Viewer] Git 서브모듈 초기화/업데이트 중 (--recurse-submodules 권장 클론)"
+    git submodule update --init --recursive || true
+  fi
+fi
+
 # Prefer local TF data inside project if present; copy from user cache if available
 PROJECT_DIR="$SCRIPT_DIR"
 LOCAL_TF_DIR="$PROJECT_DIR/data/text-fabric-data"

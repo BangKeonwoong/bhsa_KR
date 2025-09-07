@@ -9,6 +9,7 @@
   - macOS/Linux: `./run.sh` 또는 `python app.py`
   - Windows: `start_viewer.bat` 또는 PowerShell `./start_viewer.ps1`
   - 모듈 실행: `python -m ctt_viewer`
+ - 클론 시 항상 서브모듈 포함 권장: `git clone --recurse-submodules <repo>`
 
 ## 패키징/설치
 - 로컬 설치(개발):
@@ -61,11 +62,48 @@ docker run --rm -it \
 
 ## 데이터
 - CTT: `data/ctt/<book>/<chapter>/*.CTT`
-- BHSA: `data/text-fabric-data/etcbc/bhsa/tf/<version>/` (서브모듈)
-  - 최초 클론 후:
-    - `git submodule update --init --recursive`
-  - 갱신:
-    - `git submodule update --remote --merge`
+- BHSA(Text‑Fabric): `data/text-fabric-data/etcbc/bhsa/tf/<version>/` (서브모듈)
+
+### BHSA 데이터 가져오기(서브모듈)
+- 처음부터 서브모듈까지 함께 클론(추천):
+  ```bash
+  git clone --recurse-submodules https://github.com/BangKeonwoong/bhsa_KR.git
+  ```
+- 이미 레포를 클론했다면(서브모듈 초기화):
+  ```bash
+  git submodule update --init --recursive
+  ```
+- 빠른(얕은) 다운로드로 용량/시간 절약(네트워크 여건에 따라 권장):
+  ```bash
+  git submodule update --init --depth 1 --recommend-shallow --recursive
+  # 이후 업데이트 시도 시에도 동일하게 얕게 유지하려면 아래처럼 실행
+  git submodule update --remote --merge --depth 1 --recommend-shallow
+  ```
+- 서브모듈 갱신(최신 BHSA 반영):
+  ```bash
+  git submodule update --remote --merge
+  # 갱신된 서브모듈 커밋을 부모 레포에 반영하려면 커밋 필요
+  git add data/bhsa data/text-fabric-data/etcbc/bhsa
+  git commit -m "chore: update BHSA submodules"
+  ```
+- 확인: 아래 경로에 TF 버전 디렉터리가 보여야 합니다(예: `tf/2021`, `tf/2020`, 또는 `tf/c`).
+  ```bash
+  ls -1 data/text-fabric-data/etcbc/bhsa/tf
+  ```
+- 주의(용량): 전체 히스토리를 포함한 서브모듈은 수백 MB 이상이 될 수 있습니다. 얕은 클론(`--depth 1`)을 사용하면 속도/용량을 줄일 수 있습니다.
+
+### 대안: Text‑Fabric가 자동으로 내려받도록 사용
+- 로컬에 BHSA가 없을 경우 Text‑Fabric가 사용자 캐시(`~/text-fabric-data`)로 내려받을 수 있습니다. 이 레포의 실행 스크립트(run.sh/start_viewer.ps1)는 사용자 캐시에서 `data/text-fabric-data`로 복사 시도를 합니다.
+- 수동으로 내려받기(예시):
+  ```bash
+  # 가상환경 등에서 실행
+  python - <<'PY'
+from tf.fabric import Fabric
+TF = Fabric(locations='data/text-fabric-data', modules=['etcbc/bhsa/tf/2021'])
+api = TF.load('otext otype oslots')
+print('OK' if api else 'FAIL')
+PY
+  ```
 
 ## 주요 엔드포인트
 - `/` 정적 UI

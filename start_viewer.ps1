@@ -54,6 +54,17 @@ if (-not $useEmbedded) {
   . $venvActivate
 }
 
+# Ensure git submodules are initialized
+try {
+  if (Test-Path "$PSScriptRoot/.git") {
+    $status = & git submodule status 2>$null
+    if ($status -match "^-\w+") {
+      Write-Host "[CTT Viewer] Initializing/updating git submodules (clone with --recurse-submodules recommended)"
+      & git submodule update --init --recursive | Out-Null
+    }
+  }
+} catch {}
+
 function Repair-Pip {
   Write-Host "[CTT Viewer] Repair pip via ensurepip"
   try { & $venvPython -m ensurepip -U --default-pip | Out-Null } catch {}
