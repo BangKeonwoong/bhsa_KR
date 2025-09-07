@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ctt-viewer"
+version = "0.1.0"
+description = "CTT/BHSA viewer Flask app"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "Proprietary"}
+authors = [{ name = "Bang Keonwoong" }]
+dependencies = [
+  "Flask>=2.2,<3.0",
+  "text-fabric>=9.0,<10.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/BangKeonwoong/bhsa_KR"
+
+[project.scripts]
+ctt-viewer = "ctt_viewer.__main__:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+  "ctt_viewer*",
+  "parser*",
+]
+
+[tool.setuptools.package-data]
+ctt_viewer = [
+  "static/*.html",
+  "static/*.yaml",
+  "static/*.js",
+  "static/*.css",
+]

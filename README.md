@@ -10,6 +10,15 @@
   - Windows: `start_viewer.bat` 또는 PowerShell `./start_viewer.ps1`
   - 모듈 실행: `python -m ctt_viewer`
 
+## 패키징/설치
+- 로컬 설치(개발):
+  - `pip install -e .`
+  - 실행: `ctt-viewer` 또는 `python -m ctt_viewer`
+- 정적 리소스 경로(설치 환경):
+  - 기본적으로 패키지 내부 또는 저장소 루트의 `static/`을 자동 탐지합니다.
+  - 필요 시 환경변수로 지정: `STATIC_DIR=/path/to/static`
+  - 폰트/데이터도 지정 가능: `FONT_DIR`, `DATA_CTT_DIR`, `KNT_DIR`
+
 ## 데이터
 - CTT: `data/ctt/<book>/<chapter>/*.CTT`
 - BHSA: `data/text-fabric-data/etcbc/bhsa/tf/<version>/` (서브모듈)

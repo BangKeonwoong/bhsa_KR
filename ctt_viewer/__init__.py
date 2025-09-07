@@ -6,6 +6,7 @@ from .logging_config import setup_logging
 from .config import BaseConfig, apply_env_overrides
 from .errors import register_error_handlers
 from .middleware import init_request_logging, init_request_id, init_cors
+from .paths import static_dir as _static_dir
 
 
 def project_root() -> Path:
@@ -22,7 +23,7 @@ def create_app() -> Flask:
     # Initialize logging early so Flask/Werkzeug follow our settings
     setup_logging()
     root = project_root()
-    static_dir = root / "static"
+    static_dir = _static_dir()
     app = Flask(
         __name__,
         static_url_path="",
