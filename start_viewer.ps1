@@ -86,6 +86,22 @@ function Ensure-EmbeddedPython {
   try {
     if (-not (Test-Path $embedDir)) { New-Item -ItemType Directory -Force -Path $embedDir | Out-Null }
     Expand-Archive -LiteralPath $zip -DestinationPath $embedDir -Force
+    # Ensure embeddable Python loads site-packages (required for pip)
+    try {
+      $pth = Get-ChildItem -LiteralPath $embedDir -Filter "python*._pth" -File | Select-Object -First 1
+      if ($pth) {
+        $lines = Get-Content -LiteralPath $pth.FullName
+        $hasImportSite = $false
+        $new = @()
+        foreach ($ln in $lines) {
+          if ($ln -match '^\s*#\s*import site\s*$') { $new += 'import site'; $hasImportSite = $true }
+          elseif ($ln -match '^\s*import site\s*$') { $new += $ln; $hasImportSite = $true }
+          else { $new += $ln }
+        }
+        if (-not $hasImportSite) { $new += 'import site' }
+        Set-Content -LiteralPath $pth.FullName -Value $new -Encoding ASCII
+      }
+    } catch {}
   } catch {
     Write-Host "[CTT Viewer] Failed to extract Python embeddable."
     exit 1
