@@ -36,7 +36,10 @@ if (-not $python) {
 }
 
 $venvDir = Join-Path $PSScriptRoot '.venv'
-$resetVenv = [string]::IsNullOrEmpty($env:RESET_VENV) ? $false : ($env:RESET_VENV -eq '1')
+$resetVenv = $false
+if (-not [string]::IsNullOrEmpty($env:RESET_VENV)) {
+  $resetVenv = ($env:RESET_VENV -eq '1')
+}
 if ($resetVenv -and (Test-Path $venvDir)) {
   Write-Host "[CTT Viewer] Reset venv (.venv)"
   try { Remove-Item -Recurse -Force -LiteralPath $venvDir } catch {}
@@ -105,17 +108,13 @@ if (Test-Path $req) {
     # Quick module check to skip pip when already satisfied
     $importOk = $false
     try {
-      & $venvPython - << 'PY' | Out-Null
-import importlib, sys
-ok = True
-for m in ("flask", "tf.fabric"):
-    try:
-        importlib.import_module(m)
-    except Exception:
-        ok = False
-        break
-raise SystemExit(0 if ok else 1)
-PY
+      & $venvPython -c "import importlib,sys; ok=True
+for m in ('flask','tf.fabric'):
+  try:
+    importlib.import_module(m)
+  except Exception:
+    ok=False; break
+import sys; sys.exit(0 if ok else 1)" 2>$null
       if ($LASTEXITCODE -eq 0) { $importOk = $true }
     } catch {}
     if ($importOk) {
