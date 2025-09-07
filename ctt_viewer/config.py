@@ -41,6 +41,8 @@ class BaseConfig:
     COMPRESS_MIMETYPES: str = os.environ.get("COMPRESS_MIMETYPES", "application/json")
     # 압축된 응답의 ETag를 weak로 변경할지 여부
     WEAK_ETAG_FOR_COMPRESSED: bool = bool(int(os.environ.get("WEAK_ETAG_FOR_COMPRESSED", "1")))
+    # 느린 요청 경고 임계값(ms)
+    SLOW_REQUEST_MS: int = int(os.environ.get("SLOW_REQUEST_MS", "1500"))
 
 
 def _set_if_env(app, key: str, cast):

@@ -122,13 +122,14 @@
         if (savedCh>0) elChapter.value = String(savedCh);
       }
       try { updateChapterMaxForBook(elBook.value); } catch(e){}
-      if (!q.source && selSource){ selSource.value = getPref('source',''); }
+      if (!q.source && selSource){ selSource.value = getPref('source','tf'); }
       if (!q.orientation && selOrient){ selOrient.value = getPref('orientation','horizontal'); }
+      if (selAnchorMode){ selAnchorMode.value = getPref('anchor','selection') || 'selection'; state.anchorMode = selAnchorMode.value; }
       // toggles and sliders
       try { if (chkGloss) chkGloss.checked = (getPref('gloss','')==='1'); } catch(e){}
       try { if (chkGlossKo) chkGlossKo.checked = (getPref('glossKo','')==='1'); } catch(e){}
-      try { if (chkLegend) { chkLegend.checked = (getPref('legend','')==='1'); legendPanel.classList.toggle('visible', chkLegend.checked); } } catch(e){}
-      try { if (chkDetails) { chkDetails.checked = (getPref('details','')==='1'); detailsPanel.classList.toggle('visible', chkDetails.checked); if (detailsResizer) detailsResizer.classList.toggle('visible', chkDetails.checked); } } catch(e){}
+      try { if (chkLegend) { const v = getPref('legend','1'); chkLegend.checked = (v==='1'); legendPanel.classList.toggle('visible', chkLegend.checked); } } catch(e){}
+      try { if (chkDetails) { const v = getPref('details','1'); chkDetails.checked = (v==='1'); detailsPanel.classList.toggle('visible', chkDetails.checked); if (detailsResizer) detailsResizer.classList.toggle('visible', chkDetails.checked); } } catch(e){}
       try { const sp = parseInt(getPref('spacing','')||'0',10); if (sp && spacingRange) { spacingRange.value = String(sp); spacingValue.textContent = String(sp); state.spacing = sp; } } catch(e){}
       try { const dp = parseInt(getPref('depth','')||''); if (!isNaN(dp) && depthRange) { depthRange.value = String(dp); depthValue.textContent = String(dp); state.depthLimit = dp; } } catch(e){}
     } catch(e){}
@@ -182,7 +183,7 @@
   btnTidy.addEventListener('click', () => { switchView('tidy'); updateUrlFromState(false); });
   btnList.addEventListener('click', () => { switchView('list'); updateUrlFromState(false); });
   selOrient.addEventListener('change', () => { state.orientation = selOrient.value; try { setPref('orientation', selOrient.value); } catch(e){} updateUrlFromState(false); renderTidy(); });
-  if (selAnchorMode) selAnchorMode.addEventListener('change', () => { state.anchorMode = selAnchorMode.value || 'center'; renderTidy(); });
+  if (selAnchorMode) selAnchorMode.addEventListener('change', () => { state.anchorMode = selAnchorMode.value || 'center'; try { setPref('anchor', state.anchorMode); } catch(e){} renderTidy(); });
   if (selSource) selSource.addEventListener('change', () => { try { setPref('source', selSource.value||''); } catch(e){} updateUrlFromState(false); loadData(); });
   window.addEventListener('popstate', () => { applyInitialStateFromQuery(); loadData(); });
   if (chkGloss) chkGloss.addEventListener('change', ()=> {
@@ -280,7 +281,19 @@
   state.tidySegCache = new Map();
   const API_CACHE_TTL_MS = 30000; // 30s default
   const API_CACHE_MAX = 100; // simple LRU max size
-  initBooks().then(() => { applyInitialStateFromQuery(); applySavedPreferences(); updateUrlFromState(false); }).then(initTfStatus).then(loadData).catch(loadData);
+  function ensureFirstRunDefaults(){
+    try {
+      const flag = getPref('firstRun','');
+      if (!flag){
+        setPref('source','tf');
+        setPref('anchor','selection');
+        setPref('legend','1');
+        setPref('details','1');
+        setPref('firstRun','1');
+      }
+    } catch(e){}
+  }
+  initBooks().then(() => { ensureFirstRunDefaults(); applyInitialStateFromQuery(); applySavedPreferences(); updateUrlFromState(false); }).then(initTfStatus).then(loadData).catch(loadData);
 
   async function fetchJsonCached(url){
     const now = Date.now();

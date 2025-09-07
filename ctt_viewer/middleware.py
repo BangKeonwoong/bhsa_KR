@@ -49,15 +49,17 @@ def init_request_logging(app) -> None:
             except Exception:
                 dur_ms = None
             ua = request.headers.get('User-Agent', '-')
-            logger.info(
-                "%s %s status=%s duration_ms=%.1f rid=%s ua=%s",
-                request.method,
-                path,
-                getattr(resp, 'status_code', '-'),
-                (dur_ms or 0.0),
-                rid,
-                ua,
-            )
+            # Slow request warn threshold (ms)
+            try:
+                slow_ms = float(current_app.config.get('SLOW_REQUEST_MS', 1500))
+            except Exception:
+                slow_ms = 1500.0
+            msg = "%s %s status=%s duration_ms=%.1f rid=%s ua=%s"
+            args = (request.method, path, getattr(resp, 'status_code', '-'), (dur_ms or 0.0), rid, ua)
+            if (dur_ms or 0.0) >= slow_ms:
+                logger.warning(msg, *args)
+            else:
+                logger.info(msg, *args)
         finally:
             return resp
 
