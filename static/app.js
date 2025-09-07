@@ -41,6 +41,53 @@
   const spacingValue = document.getElementById('spacingValue');
   const elLoadStatus = document.getElementById('loadStatus');
 
+  // --- URL state helpers (deeplink) ---
+  function getCurrentView(){ return tidyView.classList.contains('visible') ? 'tidy' : 'list'; }
+  function readQueryState(){
+    const u = new URL(window.location.href);
+    const p = u.searchParams;
+    const q = {};
+    if (p.get('book')) q.book = p.get('book');
+    if (p.get('chapter')) q.chapter = parseInt(p.get('chapter'), 10) || undefined;
+    if (p.get('source')) q.source = p.get('source');
+    if (p.get('view')) q.view = p.get('view');
+    if (p.get('orientation')) q.orientation = p.get('orientation');
+    return q;
+  }
+  function updateUrlFromState(push){
+    try {
+      const u = new URL(window.location.href);
+      const params = u.searchParams;
+      const book = elBook && elBook.value || '';
+      const ch = elChapter && (elChapter.value || '');
+      const src = selSource && selSource.value ? selSource.value : '';
+      const view = getCurrentView();
+      const ori = selOrient && selOrient.value || 'horizontal';
+      params.set('book', book || 'genesis');
+      if (ch) params.set('chapter', String(ch)); else params.delete('chapter');
+      if (src) params.set('source', src); else params.delete('source');
+      if (view && view !== 'tidy') params.set('view', view); else params.delete('view');
+      if (ori && ori !== 'horizontal') params.set('orientation', ori); else params.delete('orientation');
+      u.search = params.toString();
+      if (push) window.history.pushState({}, '', u.toString());
+      else window.history.replaceState({}, '', u.toString());
+    } catch(e) { /* ignore */ }
+  }
+  function applyInitialStateFromQuery(){
+    try {
+      const q = readQueryState();
+      if (q.book){
+        const opt = Array.from(elBook.options).find(o => (o.value||'').toLowerCase() === String(q.book).toLowerCase());
+        if (opt) elBook.value = opt.value;
+      }
+      if (q.chapter && q.chapter > 0){ elChapter.value = String(q.chapter); }
+      try { updateChapterMaxForBook(elBook.value); } catch(e){}
+      if (selSource && q.source){ selSource.value = q.source; }
+      if (selOrient && q.orientation){ selOrient.value = q.orientation; }
+      if (q.view === 'list'){ switchView('list'); } else { switchView('tidy'); }
+    } catch(e) { /* ignore */ }
+  }
+
   elLoad.addEventListener('click', loadData);
   // Auto-load on Book change
   if (elBook) elBook.addEventListener('change', () => {
@@ -82,15 +129,16 @@
       }
     });
   }
-  if (btnPrevBook) btnPrevBook.addEventListener('click', () => navigateBook(-1));
-  if (btnNextBook) btnNextBook.addEventListener('click', () => navigateBook(1));
-  if (btnPrevChap) btnPrevChap.addEventListener('click', () => navigateChapter(-1));
-  if (btnNextChap) btnNextChap.addEventListener('click', () => navigateChapter(1));
-  btnTidy.addEventListener('click', () => switchView('tidy'));
-  btnList.addEventListener('click', () => switchView('list'));
-  selOrient.addEventListener('change', () => { state.orientation = selOrient.value; renderTidy(); });
+  if (btnPrevBook) btnPrevBook.addEventListener('click', () => { navigateBook(-1); });
+  if (btnNextBook) btnNextBook.addEventListener('click', () => { navigateBook(1); });
+  if (btnPrevChap) btnPrevChap.addEventListener('click', () => { navigateChapter(-1); });
+  if (btnNextChap) btnNextChap.addEventListener('click', () => { navigateChapter(1); });
+  btnTidy.addEventListener('click', () => { switchView('tidy'); updateUrlFromState(false); });
+  btnList.addEventListener('click', () => { switchView('list'); updateUrlFromState(false); });
+  selOrient.addEventListener('change', () => { state.orientation = selOrient.value; updateUrlFromState(false); renderTidy(); });
   if (selAnchorMode) selAnchorMode.addEventListener('change', () => { state.anchorMode = selAnchorMode.value || 'center'; renderTidy(); });
-  if (selSource) selSource.addEventListener('change', () => { loadData(); });
+  if (selSource) selSource.addEventListener('change', () => { updateUrlFromState(false); loadData(); });
+  window.addEventListener('popstate', () => { applyInitialStateFromQuery(); loadData(); });
   if (chkGloss) chkGloss.addEventListener('change', ()=> {
     state.showGloss = !!chkGloss.checked;
     // 토글 직후 gloss 데이터가 하나도 없으면(경량 모드 가정) 상세 포함으로 재요청
@@ -184,7 +232,7 @@
   state.tidySegCache = new Map();
   const API_CACHE_TTL_MS = 30000; // 30s default
   const API_CACHE_MAX = 100; // simple LRU max size
-  initBooks().then(initTfStatus).then(loadData).catch(loadData);
+  initBooks().then(() => { applyInitialStateFromQuery(); updateUrlFromState(false); }).then(initTfStatus).then(loadData).catch(loadData);
 
   async function fetchJsonCached(url){
     const now = Date.now();
@@ -289,6 +337,7 @@
     if (bookVal) elBook.value = bookVal;
     if (chap) elChapter.value = String(chap);
     try { updateChapterMaxForBook(elBook.value); } catch(e){}
+    updateUrlFromState(false);
     loadData();
   }
   function getMaxChapterForBook(bookVal){
