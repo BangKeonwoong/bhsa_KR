@@ -22,17 +22,43 @@ function Get-ArchTag {
     if ([Environment]::Is64BitOperatingSystem) { return 'amd64' } else { return 'win32' }
   } catch { return 'amd64' }
 }
-function Download-File($url, $dst) {
+function Set-Tls12 {
+  try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
+}
+function Download-FileOnce($url, $dst) {
+  Set-Tls12
+  # Prefer Invoke-WebRequest
   try {
-    Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $dst -TimeoutSec 60
+    Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $dst -TimeoutSec 90
     return $true
-  } catch {
-    try {
-      $wc = New-Object System.Net.WebClient
-      $wc.DownloadFile($url, $dst)
-      return $true
-    } catch { return $false }
+  } catch {}
+  # Try curl.exe if available
+  try {
+    if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+      & curl.exe -L --connect-timeout 15 --max-time 120 -o $dst $url
+      if ($LASTEXITCODE -eq 0 -and (Test-Path $dst)) { return $true }
+    }
+  } catch {}
+  # Fallback to WebClient
+  try {
+    $wc = New-Object System.Net.WebClient
+    $wc.DownloadFile($url, $dst)
+    return $true
+  } catch {}
+  return $false
+}
+function Download-File($url, $dst, $retries=3) {
+  for ($i=1; $i -le [Math]::Max(1,$retries); $i++) {
+    Write-Host "[CTT Viewer] Downloading: $url (attempt $i)"
+    if (Download-FileOnce $url $dst) {
+      try {
+        $info = Get-Item -LiteralPath $dst -ErrorAction Stop
+        if ($info.Length -gt 1000000) { return $true } # >1MB looks sane
+      } catch {}
+    }
+    Start-Sleep -Seconds ([Math]::Min(5*$i,15))
   }
+  return $false
 }
 function Ensure-EmbeddedPython {
   $embedDir = Join-Path $PSScriptRoot 'python-embed'
@@ -42,10 +68,20 @@ function Ensure-EmbeddedPython {
   $ver = '3.11.8'
   $arch = Get-ArchTag
   $zip = Join-Path $PSScriptRoot "python-${ver}-embed-${arch}.zip"
-  $url = "https://www.python.org/ftp/python/${ver}/python-${ver}-embed-${arch}.zip"
-  if (-not (Download-File $url $zip)) {
-    Write-Host "[CTT Viewer] Failed to download Python embeddable. Please install Python 3 manually."
-    exit 1
+  $defaultUrl = "https://www.python.org/ftp/python/${ver}/python-${ver}-embed-${arch}.zip"
+  $overrideUrl = $env:PY_EMBED_URL
+  $url = if ([string]::IsNullOrEmpty($overrideUrl)) { $defaultUrl } else { $overrideUrl }
+  if (-not (Download-File $url $zip 3)) {
+    # Last resort: try default URL if override was set and vice versa
+    if ([string]::IsNullOrEmpty($overrideUrl)) {
+      Write-Host "[CTT Viewer] Download failed: $defaultUrl"
+    } else {
+      Write-Host "[CTT Viewer] Download failed: $url; retrying with default: $defaultUrl"
+      if (-not (Download-File $defaultUrl $zip 2)) {
+        Write-Host "[CTT Viewer] Failed to download Python embeddable. Please install Python 3 manually."
+        exit 1
+      }
+    }
   }
   try {
     if (-not (Test-Path $embedDir)) { New-Item -ItemType Directory -Force -Path $embedDir | Out-Null }
