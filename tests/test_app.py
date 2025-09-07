@@ -88,6 +88,23 @@ class AppRoutesTest(unittest.TestCase):
         vary = rv1.headers.get('Vary', '')
         self.assertIn('Accept-Encoding', vary)
 
+    def test_nocache_query_bypasses_304_and_sets_ttl_zero(self):
+        # First: warm ETag
+        app = create_app()
+        c = app.test_client()
+        rv1 = c.get('/api/types?source=ctt')
+        self.assertEqual(rv1.status_code, 200)
+        et = rv1.headers.get('ETag','')
+        self.assertTrue(et)
+        # With If-None-Match normally 304
+        rv2 = c.get('/api/types?source=ctt', headers={'If-None-Match': et})
+        self.assertEqual(rv2.status_code, 304)
+        # With nocache=1 should return 200 and max-age=0
+        rv3 = c.get('/api/types?source=ctt&nocache=1', headers={'If-None-Match': et})
+        self.assertEqual(rv3.status_code, 200)
+        cc = rv3.headers.get('Cache-Control','')
+        self.assertIn('max-age=0', cc)
+
     def test_openapi_yaml(self):
         rv = self.client.get('/openapi.yaml')
         self.assertEqual(rv.status_code, 200)

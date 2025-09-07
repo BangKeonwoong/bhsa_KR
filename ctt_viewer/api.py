@@ -12,9 +12,10 @@ from typing import Optional
 from .http_utils import resp_304, resp_json, APP_START_GMT, httpdate
 from .paths import font_dir, ctt_data_dir, knt_dir
 
-from parser.ctt_parser import parse_ctt_cached, enumerate_ctt_ctypes
+from parser.ctt_parser import parse_ctt_cached, enumerate_ctt_ctypes, parse_ctt
 from parser.bhsa import (
     parse_chapter_tf_cached,
+    parse_chapter_tf,
     typ_stats,
     get_phrase_segments,
     has_local_bhsa_data,
@@ -45,6 +46,21 @@ def _cache_cfg_tree(is_lite: bool) -> tuple[int, int]:
     if is_lite:
         return int(cfg.get('TREE_LITE_MAX_AGE', 600)), int(cfg.get('TREE_LITE_SWR', 120))
     return int(cfg.get('TREE_FULL_MAX_AGE', 120)), int(cfg.get('TREE_FULL_SWR', 60))
+
+
+def _is_nocache() -> bool:
+    try:
+        q = (request.args.get('nocache', '') or '').strip().lower()
+        if q in ('1', 'true'): return True
+        cc = (request.headers.get('Cache-Control', '') or '').lower()
+        if 'no-cache' in cc or 'no-store' in cc: return True
+        pragma = (request.headers.get('Pragma', '') or '').lower()
+        if 'no-cache' in pragma: return True
+        xdbg = (request.headers.get('X-Debug-NoCache', '') or '').strip().lower()
+        if xdbg in ('1','true'): return True
+    except Exception:
+        return False
+    return False
 
 
 def _latest_ctt_mtime(path: Path | None) -> Optional[str]:
@@ -216,6 +232,65 @@ def _tree_payload_cached(book_param: str, chapter: int, requested: str, lite: bo
     return payload, etag, last_mod
 
 
+def _tree_payload_uncached(book_param: str, chapter: int, requested: str, lite: bool, bhsa_avail: bool) -> tuple[str, str, Optional[str]]:
+    book = (book_param or '').strip().lower()
+    book_label = resolve_book_label(book_param)
+    title = f"{BOOK_LABEL_TO_NAME.get(book_label, book.title())} {chapter}"
+    folder = BOOK_DIR.get(book)
+    use_tf = (requested == 'tf') and bhsa_avail
+    tree = None
+    if use_tf:
+        try:
+            tree = parse_chapter_tf(book_label=book_label, chapter=chapter, title=title, include_details=not lite)
+        except Exception:
+            tree = None
+    if tree is None or not isinstance(tree, dict) or not tree.get('children'):
+        data_dir = ctt_data_dir()
+        if folder:
+            path = data_dir / folder / f"{chapter:02d}" / f"{folder}{chapter:02d}.CTT"
+            if path.exists():
+                tree = parse_ctt(path, book_label=book_label, title=title)
+            else:
+                try:
+                    tree = parse_chapter_tf(book_label=book_label, chapter=chapter, title=title, include_details=not lite)
+                except Exception:
+                    tree = None
+        else:
+            try:
+                tree = parse_chapter_tf(book_label=book_label, chapter=chapter, title=title, include_details=not lite)
+            except Exception:
+                tree = None
+    if tree is None:
+        payload = json.dumps({"error": "no data available for this request"}, ensure_ascii=False, separators=(",", ":"))
+        etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+        return payload, etag, None
+    if lite:
+        def strip(n):
+            if isinstance(n, dict):
+                n.pop('tokens', None)
+                for c in (n.get('children') or []):
+                    strip(c)
+        strip(tree)
+    payload = json.dumps(tree, ensure_ascii=False, separators=(",", ":"))
+    etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+    # Last-Modified similar to cached path
+    last_mod = None
+    try:
+        src = (tree.get('source') or '').lower()
+        if src == 'ctt':
+            b = (book_param or '').strip().lower()
+            folder2 = BOOK_DIR.get(b)
+            ctt_path = None
+            if folder2:
+                ctt_path = ctt_data_dir() / folder2 / f"{chapter:02d}" / f"{folder2}{chapter:02d}.CTT"
+            last_mod = _latest_ctt_mtime(ctt_path)
+        else:
+            last_mod = _latest_tf_mtime()
+    except Exception:
+        last_mod = None
+    return payload, etag, last_mod
+
+
 @lru_cache(maxsize=LRU_PHRASES_CACHE)
 def _payload_tf_phrases_cached(node_id: int, level: str) -> tuple[str, str]:
     try:
@@ -298,6 +373,11 @@ def api_tree():
     lite = (request.args.get("lite", "1") or "1").lower() not in ("0", "false")
     bhsa_avail = has_local_bhsa_data()
     try:
+        nocache = _is_nocache()
+        if nocache:
+            payload, etag, last_mod = _tree_payload_uncached(book_param, chapter, requested, lite, bhsa_avail)
+            # force fresh response
+            return resp_json(payload, etag, last_mod, 0, 0)
         payload, etag, last_mod = _tree_payload_cached(book_param, chapter, requested, lite, bhsa_avail)
         inm = request.headers.get('If-None-Match', '')
         ma, swr = _cache_cfg_tree(lite)
@@ -331,6 +411,8 @@ def api_knt_verse():
     etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
     inm = request.headers.get('If-None-Match', '')
     lm = _latest_ctt_mtime(kpath)
+    if _is_nocache():
+        return resp_json(payload, etag, lm, 0, 0)
     ma, swr = _cache_cfg()
     if inm and (etag in inm):
         return resp_304(etag, lm, ma, swr)
@@ -372,6 +454,8 @@ def api_books_chapters():
     etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
     inm = request.headers.get('If-None-Match', '')
     last_mod = httpdate(latest_mtime) if latest_mtime > 0 else _latest_ctt_root_mtime(KNT_DIR)
+    if _is_nocache():
+        return resp_json(payload, etag, last_mod, 0, 0)
     ma, swr = _cache_cfg()
     if inm and (etag in inm):
         return resp_304(etag, last_mod, ma, swr)
@@ -391,6 +475,11 @@ def api_tf_phrases():
         return jsonify({"error": "invalid node_id"}), 400
     key_level = 'phrase' if level != 'phrase_atom' else 'phrase_atom'
     try:
+        if _is_nocache():
+            segs = get_phrase_segments(node_id, key_level)
+            payload = json.dumps({ 'node_id': node_id, 'level': key_level, 'segments': segs }, ensure_ascii=False, separators=(",", ":"))
+            etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+            return resp_json(payload, etag, None, 0, 0)
         payload, etag = _payload_tf_phrases_cached(node_id, key_level)
         inm = request.headers.get('If-None-Match', '')
         ma, swr = _cache_cfg()
@@ -412,6 +501,13 @@ def api_tf_node():
     if not node_id:
         return jsonify({"error": "invalid id"}), 400
     try:
+        if _is_nocache():
+            det = node_details(node_id) or {}
+            if not det:
+                return jsonify({"error": "not found"}), 404
+            payload = json.dumps(det, ensure_ascii=False, separators=(",", ":"))
+            etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+            return resp_json(payload, etag, None, 0, 0)
         payload, etag = _payload_tf_node_cached(node_id)
         inm = request.headers.get('If-None-Match', '')
         ma, swr = _cache_cfg()
@@ -434,6 +530,24 @@ def api_types():
     except Exception:
         max_ch = 0
     try:
+        if _is_nocache():
+            if src == 'ctt':
+                stats = enumerate_ctt_ctypes()
+                types = sorted(({ 'type': k, 'count': v } for k, v in stats.items()), key=lambda x: (-x['count'], x['type']))
+                data = { 'source': 'ctt', 'types': types }
+                payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+                etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+                return resp_json(payload, etag, _latest_ctt_root_mtime(ctt_data_dir()), 0, 0)
+            if not has_local_bhsa_data():
+                payload = json.dumps({ 'error': 'BHSA(Text-Fabric) 데이터가 로컬에 없습니다.' }, ensure_ascii=False, separators=(",", ":"))
+                etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+                return resp_json(payload, etag, _latest_tf_mtime(), 0, 0)
+            st = typ_stats(book or None, max_chapters=(max_ch or None))
+            types = sorted(({ 'type': k, 'count': v } for k, v in st.items()), key=lambda x: (-x['count'], x['type']))
+            data = { 'source': 'tf', 'book': book or None, 'types': types }
+            payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+            etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+            return resp_json(payload, etag, _latest_tf_mtime(), 0, 0)
         payload, etag, last_mod = _payload_types_cached(src, book, max_ch, has_local_bhsa_data())
         inm = request.headers.get('If-None-Match', '')
         ma, swr = _cache_cfg()
@@ -447,6 +561,17 @@ def api_types():
 @api_bp.get("/api/gloss/status")
 def api_gloss_status():
     try:
+        if _is_nocache():
+            st = gloss_ko_status()
+            payload = json.dumps(st, ensure_ascii=False, separators=(",", ":"))
+            etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+            last_mod = None
+            try:
+                p = Path(st.get('path') or '') if isinstance(st, dict) else None
+                if p and p.exists(): last_mod = httpdate(p.stat().st_mtime)
+            except Exception:
+                last_mod = None
+            return resp_json(payload, etag, last_mod, 0, 0)
         payload, etag, last_mod = _payload_gloss_status_cached()
         inm = request.headers.get('If-None-Match', '')
         ma, swr = _cache_cfg()
