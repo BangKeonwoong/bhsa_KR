@@ -26,6 +26,14 @@ cd bhsa_KR
 - PowerShell 정책으로 `.ps1` 실행이 막히는 환경에서도 `.bat`가 자동으로 우회(-ExecutionPolicy Bypass).
 - Python이 없으면 자동으로 embeddable Python(3.11)을 다운로드/설정 후 진행합니다(최초 1회).
 
+옵션: 자동 설치 도우미(winget)
+```
+# winget이 있고, Python/Git 미설치라면 자동 설치 후 실행
+PowerShell> .\setup_windows.ps1 -AutoInstall
+# 또는 환경변수로
+PowerShell> $env:AUTO_INSTALL='1'; .\setup_windows.ps1
+```
+
 3) 브라우저 열림 확인: `http://127.0.0.1:5001/`
    - 상단 상태가 “TF gloss 사용 가능”이면 정상. 문제가 있으면 `Invoke-RestMethod http://127.0.0.1:5001/api/tf/status`로 확인.
 
@@ -48,7 +56,8 @@ cd bhsa_KR
 
 3) 실행
 ```
-./run.sh
+./run.sh            # 일반 실행
+AUTO_INSTALL=1 ./run.sh   # Python 미설치 시 Homebrew로 자동 설치 시도
 ```
 - 권한 문제 시: `chmod +x run.sh` 후 재실행
 - 최초 실행 시 venv 생성, pip로 의존성 설치, 사용자 캐시(`~/text-fabric-data`)에서 TF 데이터 복사 시도

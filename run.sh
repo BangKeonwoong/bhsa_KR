@@ -24,8 +24,22 @@ find_python() {
 # Pick Python
 PY="$(find_python || true)"
 if [ -z "${PY:-}" ]; then
-  echo "[CTT Viewer] Python3를 찾을 수 없습니다. 설치 후 다시 실행하세요."
-  exit 1
+  echo "[CTT Viewer] Python3를 찾을 수 없습니다."
+  if [ "${AUTO_INSTALL:-}" = "1" ]; then
+    if command -v brew >/dev/null 2>&1; then
+      echo "[CTT Viewer] Homebrew로 Python 설치를 시도합니다 (sudo 권한 필요할 수 있음)"
+      brew update || true
+      brew install python || brew install python@3 || true
+      PY="$(find_python || true)"
+    else
+      echo "[CTT Viewer] Homebrew가 없습니다. 설치하려면: /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+      echo "[CTT Viewer] 설치 후 다시 실행하거나, 수동으로 Python3를 설치하세요."
+    fi
+  fi
+  if [ -z "${PY:-}" ]; then
+    echo "[CTT Viewer] Python3 미설치 상태입니다. 설치 후 다시 실행하세요. (자동 설치: AUTO_INSTALL=1 ./run.sh)"
+    exit 1
+  fi
 fi
 
 # Ensure Python 3; if selected 'python' is not py3, fallback to python3
