@@ -148,7 +148,7 @@ function Ensure-Pip {
     Write-Host "[CTT Viewer] Bootstrapping pip (get-pip.py)"
     $tmp = [System.IO.Path]::GetTempFileName() + '.py'
     try {
-      Invoke-WebRequest -UseBasicParsing -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile $tmp -TimeoutSec 30
+      if (-not (Download-File 'https://bootstrap.pypa.io/get-pip.py' $tmp 3)) { throw "get-pip download failed" }
       & $venvPython $tmp
     } finally { if (Test-Path $tmp) { Remove-Item $tmp -Force } }
   }
@@ -161,7 +161,7 @@ if ($useEmbedded) {
   } catch {
     $tmp = [System.IO.Path]::GetTempFileName() + '.py'
     try {
-      Invoke-WebRequest -UseBasicParsing -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile $tmp -TimeoutSec 30
+      if (-not (Download-File 'https://bootstrap.pypa.io/get-pip.py' $tmp 3)) { throw "get-pip download failed" }
       & $python $tmp
     } finally { if (Test-Path $tmp) { Remove-Item $tmp -Force } }
   }
@@ -178,7 +178,11 @@ if (Test-Path $req) {
     # Quick module check to skip pip when already satisfied
     $importOk = $false
     try {
-      & $venvPython -c "import importlib; importlib.import_module('flask'); importlib.import_module('tf.fabric')" 2>$null
+      if ($useEmbedded) {
+        & $python -c "import importlib; importlib.import_module('flask'); importlib.import_module('tf.fabric')" 2>$null
+      } else {
+        & $venvPython -c "import importlib; importlib.import_module('flask'); importlib.import_module('tf.fabric')" 2>$null
+      }
       if ($LASTEXITCODE -eq 0) { $importOk = $true }
     } catch {}
     if ($importOk) {
