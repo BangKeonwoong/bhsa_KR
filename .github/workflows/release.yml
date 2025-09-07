@@ -12,10 +12,28 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Build lightweight release ZIP
+        run: |
+          set -euxo pipefail
+          NAME="ctt_viewer-${GITHUB_REF_NAME}.zip"
+          echo "Will create $NAME"
+          # Exclude heavy data and VCS/venv caches
+          zip -r "$NAME" . \
+            -x ".git/*" \
+            -x "**/__pycache__/*" \
+            -x ".venv/*" \
+            -x "data/bhsa/*" \
+            -x "data/text-fabric-data/*" \
+            -x "*.log" \
+            -x "node_modules/*" || true
+          ls -lh "$NAME"
+          echo "ASSET=$NAME" >> $GITHUB_ENV
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          files: ${{ env.ASSET }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
