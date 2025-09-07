@@ -229,10 +229,12 @@ git push origin main --tags
 4) 릴리즈 확인: GitHub → Releases (자동 릴리즈 노트 생성)
 
 ### 릴리즈 ZIP 사용하기
-- Releases 페이지에서 `ctt_viewer-<tag>.zip`을 내려받아 압축 해제합니다.
+- Releases 페이지에서 OS별 ZIP을 내려받아 압축 해제합니다.
+  - Windows: `ctt_viewer-windows-vX.Y.Z.zip`
+  - macOS: `ctt_viewer-macos-vX.Y.Z.zip`
 - 포함 내용: 실행 스크립트/코드/정적 파일(대용량 TF 데이터 제외)
 - Windows: `start_viewer.bat` 실행 (필요 시 `setup_windows.ps1 -AutoInstall`)
-- macOS: `./run.sh` 실행 (필요 시 `AUTO_INSTALL=1 ./run.sh`)
+- macOS: 더블클릭 `Start Viewer.command` 또는 터미널에서 `./run.sh`
 - 주의: 릴리즈 ZIP에는 BHSA 서브모듈 데이터가 포함되지 않습니다. TF가 자동으로 사용자 캐시로 내려받거나, 개발용으로는 서브모듈 포함 클론을 권장합니다.
 
 ## 참고

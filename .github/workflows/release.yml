@@ -14,34 +14,63 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: false
-      - name: Build lightweight release ZIP
+      - name: Build OS-specific release ZIPs
         run: |
           set -euxo pipefail
-          NAME="ctt_viewer-${GITHUB_REF_NAME}.zip"
-          STAGE="package"
-          rm -rf "$STAGE" && mkdir -p "$STAGE"
-          # Core app code
-          cp -R ctt_viewer "$STAGE/"
-          cp -R parser "$STAGE/"
-          cp -R static "$STAGE/"
-          cp -R font "$STAGE/"
-          # Launchers and docs
-          cp -v app.py run.sh start_viewer.bat start_viewer.ps1 "Start Viewer.command" setup_windows.ps1 README-RUN.txt "$STAGE/" || true
-          cp -v README.md CHANGELOG.md requirements.txt "$STAGE/"
-          # Minimal data: sample CTT + gloss CSV + wheels readme
-          mkdir -p "$STAGE/data/ctt" "$STAGE/data/wheels"
-          if [ -d data/ctt ]; then cp -R data/ctt "$STAGE/data/"; fi
-          if [ -f data/gloss_ko.csv ]; then cp -v data/gloss_ko.csv "$STAGE/data/"; fi
-          if [ -f data/README.md ]; then mkdir -p "$STAGE/data"; cp -v data/README.md "$STAGE/data/"; fi
-          if [ -f data/wheels/README.md ]; then mkdir -p "$STAGE/data/wheels"; cp -v data/wheels/README.md "$STAGE/data/wheels/"; fi
-          # Create zip
-          (cd "$STAGE" && zip -r "../$NAME" .)
-          ls -lh "$NAME"
-          echo "ASSET=$NAME" >> $GITHUB_ENV
+          TAG="${GITHUB_REF_NAME}"
+          # Windows package
+          STAGE_W="package-windows"
+          rm -rf "$STAGE_W" && mkdir -p "$STAGE_W"
+          cp -R ctt_viewer "$STAGE_W/"
+          cp -R parser "$STAGE_W/"
+          cp -R static "$STAGE_W/"
+          cp -R font "$STAGE_W/"
+          cp -v app.py start_viewer.bat start_viewer.ps1 setup_windows.ps1 README-RUN-windows.txt "$STAGE_W/" || true
+          cp -v README.md CHANGELOG.md requirements.txt "$STAGE_W/"
+          mkdir -p "$STAGE_W/data/wheels"
+          if [ -d data/ctt ]; then cp -R data/ctt "$STAGE_W/data/"; fi
+          if [ -f data/gloss_ko.csv ]; then cp -v data/gloss_ko.csv "$STAGE_W/data/"; fi
+          if [ -f data/README.md ]; then cp -v data/README.md "$STAGE_W/data/"; fi
+          if [ -f data/wheels/README.md ]; then cp -v data/wheels/README.md "$STAGE_W/data/wheels/"; fi
+          (cd "$STAGE_W" && zip -r "../ctt_viewer-windows-${TAG}.zip" .)
+          # macOS package
+          STAGE_M="package-macos"
+          rm -rf "$STAGE_M" && mkdir -p "$STAGE_M"
+          cp -R ctt_viewer "$STAGE_M/"
+          cp -R parser "$STAGE_M/"
+          cp -R static "$STAGE_M/"
+          cp -R font "$STAGE_M/"
+          cp -v app.py run.sh "Start Viewer.command" README-RUN-macOS.txt "$STAGE_M/" || true
+          cp -v README.md CHANGELOG.md requirements.txt "$STAGE_M/"
+          mkdir -p "$STAGE_M/data/wheels"
+          if [ -d data/ctt ]; then cp -R data/ctt "$STAGE_M/data/"; fi
+          if [ -f data/gloss_ko.csv ]; then cp -v data/gloss_ko.csv "$STAGE_M/data/"; fi
+          if [ -f data/README.md ]; then cp -v data/README.md "$STAGE_M/data/"; fi
+          if [ -f data/wheels/README.md ]; then cp -v data/wheels/README.md "$STAGE_M/data/wheels/"; fi
+          (cd "$STAGE_M" && zip -r "../ctt_viewer-macos-${TAG}.zip" .)
+          echo "FILES=ctt_viewer-windows-${TAG}.zip,ctt_viewer-macos-${TAG}.zip" >> $GITHUB_ENV
+      - name: Prepare release notes from CHANGELOG
+        id: notes
+        run: |
+          set -euxo pipefail
+          VER="${GITHUB_REF_NAME#v}"
+          # Extract section starting at '## [VER]' until next '## ['
+          awk -v ver="$VER" 'BEGIN{p=0} 
+            /^## \[/ { if (p==1) exit }
+            $0 ~ ("^## \\[" ver "\\]") { p=1; next }
+            p==1 { print }' CHANGELOG.md > notes.md || true
+          if [ ! -s notes.md ]; then 
+            echo "CTT Viewer v${VER}" > notes.md
+            echo "" >> notes.md
+            echo "See CHANGELOG.md for details." >> notes.md
+          fi
+          echo "BODY_PATH=notes.md" >> $GITHUB_OUTPUT
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
-          files: ${{ env.ASSET }}
+          files: |
+            ${{ env.FILES }}
+          body_path: ${{ steps.notes.outputs.BODY_PATH }}
+          generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
