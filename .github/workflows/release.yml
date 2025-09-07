@@ -18,16 +18,24 @@ jobs:
         run: |
           set -euxo pipefail
           NAME="ctt_viewer-${GITHUB_REF_NAME}.zip"
-          echo "Will create $NAME"
-          # Exclude heavy data and VCS/venv caches
-          zip -r "$NAME" . \
-            -x ".git/*" \
-            -x "**/__pycache__/*" \
-            -x ".venv/*" \
-            -x "data/bhsa/*" \
-            -x "data/text-fabric-data/*" \
-            -x "*.log" \
-            -x "node_modules/*" || true
+          STAGE="package"
+          rm -rf "$STAGE" && mkdir -p "$STAGE"
+          # Core app code
+          cp -R ctt_viewer "$STAGE/"
+          cp -R parser "$STAGE/"
+          cp -R static "$STAGE/"
+          cp -R font "$STAGE/"
+          # Launchers and docs
+          cp -v app.py run.sh start_viewer.bat start_viewer.ps1 "Start Viewer.command" setup_windows.ps1 README-RUN.txt "$STAGE/" || true
+          cp -v README.md CHANGELOG.md requirements.txt "$STAGE/"
+          # Minimal data: sample CTT + gloss CSV + wheels readme
+          mkdir -p "$STAGE/data/ctt" "$STAGE/data/wheels"
+          if [ -d data/ctt ]; then cp -R data/ctt "$STAGE/data/"; fi
+          if [ -f data/gloss_ko.csv ]; then cp -v data/gloss_ko.csv "$STAGE/data/"; fi
+          if [ -f data/README.md ]; then mkdir -p "$STAGE/data"; cp -v data/README.md "$STAGE/data/"; fi
+          if [ -f data/wheels/README.md ]; then mkdir -p "$STAGE/data/wheels"; cp -v data/wheels/README.md "$STAGE/data/wheels/"; fi
+          # Create zip
+          (cd "$STAGE" && zip -r "../$NAME" .)
           ls -lh "$NAME"
           echo "ASSET=$NAME" >> $GITHUB_ENV
       - name: Create GitHub Release

@@ -62,6 +62,10 @@ AUTO_INSTALL=1 ./run.sh   # Python 미설치 시 Homebrew로 자동 설치 시�
 - 권한 문제 시: `chmod +x run.sh` 후 재실행
 - 최초 실행 시 venv 생성, pip로 의존성 설치, 사용자 캐시(`~/text-fabric-data`)에서 TF 데이터 복사 시도
 
+더블클릭 런처
+- Finder에서 `Start Viewer.command`를 더블클릭하여 바로 실행할 수 있습니다.
+- 내부적으로 `run.sh`를 호출하며, 기본적으로 `AUTO_INSTALL=1`이 설정되어 Python 자동 설치를 시도합니다.
+
 4) 브라우저: `http://127.0.0.1:5001/` → 상태 “TF gloss 사용 가능” 확인
 
 트러블슈팅
