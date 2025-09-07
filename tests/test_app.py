@@ -53,6 +53,17 @@ class AppRoutesTest(unittest.TestCase):
         data = rv.get_json()
         self.assertIn('version', data)
 
+    def test_openapi_yaml(self):
+        rv = self.client.get('/openapi.yaml')
+        self.assertEqual(rv.status_code, 200)
+        text = rv.get_data(as_text=True)
+        self.assertIn('openapi: 3.0', text)
+
+    def test_api_docs(self):
+        rv = self.client.get('/api/docs')
+        self.assertEqual(rv.status_code, 200)
+        self.assertIn('text/html', rv.content_type)
+
     def test_gloss_status(self):
         rv = self.client.get('/api/gloss/status')
         self.assertEqual(rv.status_code, 200)

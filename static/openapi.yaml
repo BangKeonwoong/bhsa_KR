@@ -1,0 +1,186 @@
+openapi: 3.0.3
+info:
+  title: CTT Viewer API
+  version: "1.0.0"
+  description: |
+    CTT 파일과 BHSA(Text‑Fabric) 데이터를 탐색하는 API.
+servers:
+  - url: /
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+  /api/version:
+    get:
+      summary: 버전 정보 조회
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version: { type: string }
+                  git_sha: { type: string }
+  /api/books:
+    get:
+      summary: 책 목록
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    code: { type: string }
+                    name: { type: string }
+  /api/books/chapters:
+    get:
+      summary: 책별 장 개수
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    code: { type: string }
+                    name: { type: string }
+                    chapters: { type: integer }
+  /api/knt/verse:
+    get:
+      summary: KNT 구절 텍스트
+      parameters:
+        - in: query
+          name: book
+          schema: { type: string }
+          required: true
+        - in: query
+          name: chapter
+          schema: { type: integer }
+          required: true
+        - in: query
+          name: verse
+          schema: { type: integer }
+          required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  book_label: { type: string }
+                  chapter: { type: integer }
+                  verse: { type: integer }
+                  text: { type: string }
+        '404': { description: Not found }
+  /api/tf/status:
+    get:
+      summary: BHSA/Gloss 가용성
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  has_local_bhsa: { type: boolean }
+                  has_gloss: { type: boolean }
+  /api/tree:
+    get:
+      summary: 트리 데이터 조회(CTT 또는 TF)
+      parameters:
+        - in: query
+          name: book
+          schema: { type: string }
+          required: true
+          example: genesis
+        - in: query
+          name: chapter
+          schema: { type: integer }
+          required: true
+          example: 1
+        - in: query
+          name: source
+          schema: { type: string, enum: [tf, ctt] }
+          required: false
+          example: tf
+        - in: query
+          name: lite
+          schema: { type: string, enum: ['0','1'] }
+          required: false
+          example: '1'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/tf/phrases:
+    get:
+      summary: TF 구(phrase/phrase_atom) 분해
+      parameters:
+        - in: query
+          name: node_id
+          schema: { type: integer }
+          required: true
+        - in: query
+          name: level
+          schema: { type: string, enum: [phrase, phrase_atom] }
+      responses:
+        '200': { description: OK }
+        '503': { description: BHSA 데이터 없음 }
+  /api/tf/node:
+    get:
+      summary: TF 노드 상세
+      parameters:
+        - in: query
+          name: id
+          schema: { type: integer }
+          required: true
+      responses:
+        '200': { description: OK }
+        '503': { description: BHSA 데이터 없음 }
+  /api/types:
+    get:
+      summary: 절 유형 통계(CTT 또는 TF)
+      parameters:
+        - in: query
+          name: source
+          schema: { type: string, enum: [tf, ctt] }
+        - in: query
+          name: book
+          schema: { type: string }
+        - in: query
+          name: max_chapters
+          schema: { type: integer }
+      responses:
+        '200': { description: OK }
+  /api/gloss/status:
+    get:
+      summary: 한글 gloss 매핑 상태
+      responses:
+        '200': { description: OK }
+components:
+  securitySchemes: {}

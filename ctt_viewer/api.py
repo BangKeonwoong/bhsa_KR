@@ -484,3 +484,7 @@ def register_misc_routes(app, root: Path) -> None:
         if not ver:
             ver = sha or 'unknown'
         return jsonify({ 'version': ver, 'git_sha': sha or 'unknown' })
+
+    @app.get("/api/docs")
+    def api_docs():
+        return app.send_static_file("api-docs.html")
