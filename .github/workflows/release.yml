@@ -14,6 +14,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: Build OS-specific release ZIPs
         run: |
           set -euxo pipefail
@@ -49,6 +52,48 @@ jobs:
           if [ -f data/wheels/README.md ]; then cp -v data/wheels/README.md "$STAGE_M/data/wheels/"; fi
           (cd "$STAGE_M" && zip -r "../ctt_viewer-macos-${TAG}.zip" .)
           echo "FILES=ctt_viewer-windows-${TAG}.zip,ctt_viewer-macos-${TAG}.zip" >> $GITHUB_ENV
+      - name: Build Windows portable ZIP (embedded Python + preinstalled deps)
+        run: |
+          set -euxo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          STAGE="package-windows-portable"
+          rm -rf "$STAGE" && mkdir -p "$STAGE"
+          # App files
+          cp -R ctt_viewer "$STAGE/"
+          cp -R parser "$STAGE/"
+          cp -R static "$STAGE/"
+          cp -R font "$STAGE/"
+          cp -v app.py "Start Viewer (Portable).bat" README-RUN-windows.txt README.md CHANGELOG.md requirements.txt "$STAGE/" || true
+          # Download Windows embeddable Python
+          VER=3.11.8
+          URL="https://www.python.org/ftp/python/${VER}/python-${VER}-embed-amd64.zip"
+          curl -L "$URL" -o pyembed.zip
+          mkdir -p "$STAGE/python-embed"
+          unzip -q pyembed.zip -d "$STAGE/python-embed"
+          rm -f pyembed.zip
+          # Prepare site-packages and install wheels for Windows (cp311 win_amd64)
+          mkdir -p "$STAGE/python-embed/Lib/site-packages"
+          python -m pip download --only-binary=:all: \
+            --platform win_amd64 --implementation cp --python-version 311 --abi cp311 \
+            -r requirements.txt -d winwheels
+          python - << 'PY'
+import os, zipfile
+st = os.environ['STAGE'] if 'STAGE' in os.environ else 'package-windows-portable'
+site = os.path.join(st, 'python-embed', 'Lib', 'site-packages')
+os.makedirs(site, exist_ok=True)
+for whl in os.listdir('winwheels'):
+    if not whl.endswith('.whl'): continue
+    p = os.path.join('winwheels', whl)
+    with zipfile.ZipFile(p) as z:
+        z.extractall(site)
+print('installed wheels into', site)
+PY
+          # Enable site-packages by editing _pth
+          PTH=$(ls "$STAGE/python-embed"/*._pth | head -n1)
+          printf "Lib\\site-packages\nimport site\n" >> "$PTH"
+          # Create ZIP
+          (cd "$STAGE" && zip -r "../ctt_viewer-windows-portable-${TAG}.zip" .)
+          echo "FILES=${FILES},ctt_viewer-windows-portable-${TAG}.zip" >> $GITHUB_ENV
       - name: Prepare release notes from CHANGELOG
         id: notes
         run: |

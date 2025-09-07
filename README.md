@@ -239,6 +239,9 @@ git push origin main --tags
 - Releases 페이지에서 OS별 ZIP을 내려받아 압축 해제합니다.
   - Windows: `ctt_viewer-windows-vX.Y.Z.zip`
   - macOS: `ctt_viewer-macos-vX.Y.Z.zip`
+- 추가로 Windows용 "portable" 패키지도 제공합니다: `ctt_viewer-windows-portable-vX.Y.Z.zip`
+  - 포함: Windows embeddable Python + 필요한 패키지(사전 설치)
+  - 실행: `Start Viewer (Portable).bat` (PowerShell/정책/설치 불필요)
 - 포함 내용: 실행 스크립트/코드/정적 파일(대용량 TF 데이터 제외)
 - Windows: `start_viewer.bat` 실행 (필요 시 `setup_windows.ps1 -AutoInstall`)
 - macOS: 더블클릭 `Start Viewer.command` 또는 터미널에서 `./run.sh`
