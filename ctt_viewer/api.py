@@ -171,7 +171,7 @@ def read_knt_verse(book_label: str, chapter: int, verse: int) -> Optional[str]:
 
 
 @lru_cache(maxsize=LRU_TREE_CACHE)
-def _tree_payload_cached(book_param: str, chapter: int, requested: str, lite: bool, bhsa_avail: bool) -> tuple[str, str, Optional[str]]:
+def _tree_payload_cached(book_param: str, chapter: int, requested: str, lite: bool, bhsa_avail: bool, max_depth: int) -> tuple[str, str, Optional[str]]:
     book = (book_param or '').strip().lower()
     book_label = resolve_book_label(book_param)
     title = f"{BOOK_LABEL_TO_NAME.get(book_label, book.title())} {chapter}"
@@ -212,6 +212,20 @@ def _tree_payload_cached(book_param: str, chapter: int, requested: str, lite: bo
                 for c in (n.get('children') or []):
                     strip(c)
         strip(tree)
+    # optional: limit depth (0 keeps only root)
+    if isinstance(max_depth, int) and max_depth >= 0:
+        def prune(n, d):
+            if not isinstance(n, dict):
+                return
+            if d >= max_depth:
+                # cut off children at this level
+                if 'children' in n:
+                    n['children'] = []
+                return
+            kids = n.get('children') or []
+            for c in kids:
+                prune(c, d+1)
+        prune(tree, 0)
     payload = json.dumps(tree, ensure_ascii=False, separators=(",", ":"))
     etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
     # Last-Modified based on source data
@@ -232,7 +246,7 @@ def _tree_payload_cached(book_param: str, chapter: int, requested: str, lite: bo
     return payload, etag, last_mod
 
 
-def _tree_payload_uncached(book_param: str, chapter: int, requested: str, lite: bool, bhsa_avail: bool) -> tuple[str, str, Optional[str]]:
+def _tree_payload_uncached(book_param: str, chapter: int, requested: str, lite: bool, bhsa_avail: bool, max_depth: int) -> tuple[str, str, Optional[str]]:
     book = (book_param or '').strip().lower()
     book_label = resolve_book_label(book_param)
     title = f"{BOOK_LABEL_TO_NAME.get(book_label, book.title())} {chapter}"
@@ -271,6 +285,17 @@ def _tree_payload_uncached(book_param: str, chapter: int, requested: str, lite: 
                 for c in (n.get('children') or []):
                     strip(c)
         strip(tree)
+    if isinstance(max_depth, int) and max_depth >= 0:
+        def prune(n, d):
+            if not isinstance(n, dict):
+                return
+            if d >= max_depth:
+                if 'children' in n:
+                    n['children'] = []
+                return
+            for c in (n.get('children') or []):
+                prune(c, d+1)
+        prune(tree, 0)
     payload = json.dumps(tree, ensure_ascii=False, separators=(",", ":"))
     etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
     # Last-Modified similar to cached path
@@ -371,14 +396,21 @@ def api_tree():
 
     requested = (request.args.get("source", "tf") or "tf").lower()
     lite = (request.args.get("lite", "1") or "1").lower() not in ("0", "false")
+    try:
+        max_depth = request.args.get('max_depth')
+        max_depth = int(max_depth) if (max_depth is not None and str(max_depth).strip() != '') else -1
+        if max_depth < 0:
+            max_depth = -1
+    except Exception:
+        max_depth = -1
     bhsa_avail = has_local_bhsa_data()
     try:
         nocache = _is_nocache()
         if nocache:
-            payload, etag, last_mod = _tree_payload_uncached(book_param, chapter, requested, lite, bhsa_avail)
+            payload, etag, last_mod = _tree_payload_uncached(book_param, chapter, requested, lite, bhsa_avail, max_depth)
             # force fresh response
             return resp_json(payload, etag, last_mod, 0, 0)
-        payload, etag, last_mod = _tree_payload_cached(book_param, chapter, requested, lite, bhsa_avail)
+        payload, etag, last_mod = _tree_payload_cached(book_param, chapter, requested, lite, bhsa_avail, max_depth)
         inm = request.headers.get('If-None-Match', '')
         ma, swr = _cache_cfg_tree(lite)
         if inm and (etag in inm):

@@ -141,6 +141,22 @@ class AppRoutesTest(unittest.TestCase):
         # 상세 모드 기본 TTL(120)
         self.assertIn('max-age=120', cc)
 
+    def test_tree_max_depth_limit(self):
+        # Request with max_depth=1 should have only root and its direct children
+        rv = self.client.get('/api/tree?book=genesis&chapter=1&source=ctt&lite=1&max_depth=1')
+        self.assertEqual(rv.status_code, 200)
+        data = rv.get_json()
+        # compute max depth
+        def max_depth(n):
+            if not n or not isinstance(n, dict):
+                return 0
+            kids = n.get('children') or []
+            if not kids:
+                return 0
+            return 1 + max(max_depth(c) for c in kids)
+        md = max_depth(data)
+        self.assertLessEqual(md, 1)
+
     def test_404_json(self):
         rv = self.client.get('/no-such-path-xyz')
         self.assertEqual(rv.status_code, 404)
