@@ -68,6 +68,26 @@ class AppRoutesTest(unittest.TestCase):
         enc = rv.headers.get('Content-Encoding', '')
         self.assertEqual(enc, 'gzip')
 
+    def test_weak_etag_for_compressed_and_304(self):
+        import os as _os
+        _os.environ['ENABLE_COMPRESSION'] = '1'
+        _os.environ['COMPRESS_MIN_SIZE'] = '1'
+        _os.environ['WEAK_ETAG_FOR_COMPRESSED'] = '1'
+        app3 = create_app()
+        c3 = app3.test_client()
+        # First request to get weak ETag
+        rv1 = c3.get('/api/types?source=ctt', headers={'Accept-Encoding':'gzip'})
+        self.assertEqual(rv1.status_code, 200)
+        enc1 = rv1.headers.get('Content-Encoding','')
+        self.assertEqual(enc1, 'gzip')
+        et1 = rv1.headers.get('ETag','')
+        self.assertTrue(et1.startswith('W/'))
+        # Second request with If-None-Match should return 304
+        rv2 = c3.get('/api/types?source=ctt', headers={'Accept-Encoding':'gzip','If-None-Match': et1})
+        self.assertEqual(rv2.status_code, 304)
+        vary = rv1.headers.get('Vary', '')
+        self.assertIn('Accept-Encoding', vary)
+
     def test_openapi_yaml(self):
         rv = self.client.get('/openapi.yaml')
         self.assertEqual(rv.status_code, 200)

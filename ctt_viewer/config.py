@@ -39,6 +39,8 @@ class BaseConfig:
     GZIP_LEVEL: int = int(os.environ.get("GZIP_LEVEL", "6"))
     # 쉼표 구분 mimetype 목록 (접두 일치 허용)
     COMPRESS_MIMETYPES: str = os.environ.get("COMPRESS_MIMETYPES", "application/json")
+    # 압축된 응답의 ETag를 weak로 변경할지 여부
+    WEAK_ETAG_FOR_COMPRESSED: bool = bool(int(os.environ.get("WEAK_ETAG_FOR_COMPRESSED", "1")))
 
 
 def _set_if_env(app, key: str, cast):
@@ -61,7 +63,7 @@ def apply_env_overrides(app) -> None:
     ):
         _set_if_env(app, k, lambda v: int(str(v)))
     for k in (
-        'ENABLE_CORS','ACCESS_LOG','ENABLE_COMPRESSION'
+        'ENABLE_CORS','ACCESS_LOG','ENABLE_COMPRESSION','WEAK_ETAG_FOR_COMPRESSED'
     ):
         _set_if_env(app, k, lambda v: bool(int(str(v))))
     for k in (

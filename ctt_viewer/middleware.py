@@ -142,6 +142,14 @@ def init_compression(app) -> None:
                 cdata = gzip.compress(data, compresslevel=max(1, min(9, level)))
                 resp.set_data(cdata)
                 resp.headers['Content-Encoding'] = 'gzip'
+            # If compressed, optionally weaken ETag to keep validator consistent across encodings
+            if resp.headers.get('Content-Encoding') and bool(current_app.config.get('WEAK_ETAG_FOR_COMPRESSED', True)):
+                et = resp.headers.get('ETag')
+                if et and not str(et).startswith('W/'):
+                    try:
+                        resp.headers['ETag'] = f"W/{et}"
+                    except Exception:
+                        pass
             # Add Vary header
             vary = resp.headers.get('Vary', '')
             if 'Accept-Encoding' not in vary:
