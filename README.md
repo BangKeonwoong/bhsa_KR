@@ -72,6 +72,11 @@ AUTO_INSTALL=1 ./run.sh   # Python 미설치 시 Homebrew로 자동 설치 시�
 - Python 미설치: `brew install python`
 - 포트 충돌: `PORT=5002 ./run.sh`처럼 다른 포트 지정
 - TF 데이터 미탑재: `/api/tf/status` 확인 후, `data/text-fabric-data/etcbc/bhsa/tf/<version>`에 파일이 있는지 점검
+- Gatekeeper(보안) 경고 발생 시:
+  - 오른쪽 클릭 → “열기(Open)” → 확인 대화 상자에서 “열기” 선택
+  - 또는 시스템 설정 → 보안 및 개인 정보 보호(Privacy & Security) → “차단된 앱 허용(Allow Anyway)” → 다시 실행 후 “열기”
+  - 필요 시 격리 속성 제거: `xattr -d com.apple.quarantine "Start Viewer.command"` 및 `xattr -d com.apple.quarantine ./run.sh`
+  - 실행 권한 부여: `chmod +x "Start Viewer.command" ./run.sh`
 
 ## 패키징/설치
 - 로컬 설치(개발):
