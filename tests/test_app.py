@@ -78,6 +78,16 @@ class AppRoutesTest(unittest.TestCase):
         self.assertEqual(data.get('source'), 'ctt')
         self.assertIsInstance(data.get('children'), list)
         self.assertGreater(len(data.get('children')), 0)
+        # Lite 모드 캐시 max-age 기본값(600) 확인
+        cc = rv.headers.get('Cache-Control', '')
+        self.assertIn('max-age=600', cc)
+
+    def test_tree_ctt_full_cache_ttl(self):
+        rv = self.client.get('/api/tree?book=genesis&chapter=1&source=ctt&lite=0')
+        self.assertEqual(rv.status_code, 200)
+        cc = rv.headers.get('Cache-Control', '')
+        # 상세 모드 기본 TTL(120)
+        self.assertIn('max-age=120', cc)
 
     def test_404_json(self):
         rv = self.client.get('/no-such-path-xyz')

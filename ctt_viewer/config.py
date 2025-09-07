@@ -27,6 +27,12 @@ class BaseConfig:
     CORS_ALLOW_METHODS: str = os.environ.get("CORS_ALLOW_METHODS", "GET,OPTIONS")
     CORS_ALLOW_HEADERS: str = os.environ.get("CORS_ALLOW_HEADERS", "Content-Type, If-None-Match, X-Requested-With, X-Request-ID")
 
+    # /api/tree 캐시 정책 (경량/상세)
+    TREE_LITE_MAX_AGE: int = int(os.environ.get("TREE_LITE_MAX_AGE", "600"))
+    TREE_LITE_SWR: int = int(os.environ.get("TREE_LITE_SWR", "120"))
+    TREE_FULL_MAX_AGE: int = int(os.environ.get("TREE_FULL_MAX_AGE", "120"))
+    TREE_FULL_SWR: int = int(os.environ.get("TREE_FULL_SWR", "60"))
+
 
 def apply_env_overrides(app) -> None:
     """Apply simple environment overrides that may affect Flask behavior."""

@@ -27,10 +27,24 @@ from parser.gloss_ko import gloss_ko_status
 
 api_bp = Blueprint("api", __name__)
 
+# LRU 캐시 크기를 환경변수로 조정 가능하게 (모듈 임포트 시 결정)
+LRU_TREE_CACHE = int(os.environ.get('LRU_TREE_CACHE', '128'))
+LRU_PHRASES_CACHE = int(os.environ.get('LRU_PHRASES_CACHE', '512'))
+LRU_NODE_CACHE = int(os.environ.get('LRU_NODE_CACHE', '1024'))
+LRU_TYPES_CACHE = int(os.environ.get('LRU_TYPES_CACHE', '64'))
+LRU_GLOSS_CACHE = int(os.environ.get('LRU_GLOSS_CACHE', '8'))
+
 
 def _cache_cfg() -> tuple[int, int]:
     cfg = current_app.config if current_app else {}
     return int(cfg.get('CACHE_MAX_AGE', 300)), int(cfg.get('CACHE_SWR', 60))
+
+
+def _cache_cfg_tree(is_lite: bool) -> tuple[int, int]:
+    cfg = current_app.config if current_app else {}
+    if is_lite:
+        return int(cfg.get('TREE_LITE_MAX_AGE', 600)), int(cfg.get('TREE_LITE_SWR', 120))
+    return int(cfg.get('TREE_FULL_MAX_AGE', 120)), int(cfg.get('TREE_FULL_SWR', 60))
 
 
 def _latest_ctt_mtime(path: Path | None) -> Optional[str]:
@@ -140,7 +154,7 @@ def read_knt_verse(book_label: str, chapter: int, verse: int) -> Optional[str]:
     return None
 
 
-@lru_cache(maxsize=128)
+@lru_cache(maxsize=LRU_TREE_CACHE)
 def _tree_payload_cached(book_param: str, chapter: int, requested: str, lite: bool, bhsa_avail: bool) -> tuple[str, str, Optional[str]]:
     book = (book_param or '').strip().lower()
     book_label = resolve_book_label(book_param)
@@ -202,7 +216,7 @@ def _tree_payload_cached(book_param: str, chapter: int, requested: str, lite: bo
     return payload, etag, last_mod
 
 
-@lru_cache(maxsize=512)
+@lru_cache(maxsize=LRU_PHRASES_CACHE)
 def _payload_tf_phrases_cached(node_id: int, level: str) -> tuple[str, str]:
     try:
         segs = get_phrase_segments(node_id, level)
@@ -213,7 +227,7 @@ def _payload_tf_phrases_cached(node_id: int, level: str) -> tuple[str, str]:
     return payload, etag
 
 
-@lru_cache(maxsize=1024)
+@lru_cache(maxsize=LRU_NODE_CACHE)
 def _payload_tf_node_cached(node_id: int) -> tuple[str, str]:
     det = {}
     try:
@@ -229,7 +243,7 @@ def _payload_tf_node_cached(node_id: int) -> tuple[str, str]:
     return payload, etag
 
 
-@lru_cache(maxsize=64)
+@lru_cache(maxsize=LRU_TYPES_CACHE)
 def _payload_types_cached(src: str, book: str, max_chapters: int, bhsa_avail: bool) -> tuple[str, str, Optional[str]]:
     if src == 'ctt':
         stats = enumerate_ctt_ctypes()
@@ -253,7 +267,7 @@ def _payload_types_cached(src: str, book: str, max_chapters: int, bhsa_avail: bo
     return payload, etag, last_mod
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=LRU_GLOSS_CACHE)
 def _payload_gloss_status_cached() -> tuple[str, str, Optional[str]]:
     st = gloss_ko_status()
     payload = json.dumps(st, ensure_ascii=False, separators=(",", ":"))
@@ -286,10 +300,9 @@ def api_tree():
     try:
         payload, etag, last_mod = _tree_payload_cached(book_param, chapter, requested, lite, bhsa_avail)
         inm = request.headers.get('If-None-Match', '')
+        ma, swr = _cache_cfg_tree(lite)
         if inm and (etag in inm):
-            ma, swr = _cache_cfg()
             return resp_304(etag, last_mod, ma, swr)
-        ma, swr = _cache_cfg()
         return resp_json(payload, etag, last_mod, ma, swr)
     except Exception:
         return jsonify({"error": "unexpected error"}), 500
