@@ -33,10 +33,9 @@ htmlcov/
 # Node (정적 리소스 빌드 시)
 node_modules/
 
-# --- Data policy: track docs & small samples only ---
-data/**
-!data/
-!data/README.md
-!data/samples/
-!data/samples/**
+# Data: include all contents in repo
+# (기존에는 data/** 전체를 무시했지만, 이제 전부 추적합니다)
 
+# 안전장치: 중첩된 Git 메타데이터는 절대 추적하지 않음
+**/.git/
+**/.git/**
