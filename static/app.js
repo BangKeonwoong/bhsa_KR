@@ -676,9 +676,14 @@
     try { return (elBook.options[elBook.selectedIndex] || {}).textContent || val || ''; } catch(e){ return val || ''; }
   }
   // --- Hover helpers (unified) ---
+  /**
+   * Return NodeList of tidy tree clause nodes for a given verse number.
+   * Nodes carry data-verse-num and data-has-ctype attributes.
+   */
   function _treeClauseNodesByVerse(vnum){
     try { return tidyContainer.querySelectorAll(`g.tree-node[data-verse-num="${vnum}"][data-has-ctype="1"]`); } catch(e){ return []; }
   }
+  /** Return NodeList of list-view items for a given verse number. */
   function _listClauseItemsByVerse(vnum){
     try { return listContainer.querySelectorAll(`li.node-item[data-verse-num="${vnum}"][data-has-ctype="1"]`); } catch(e){ return []; }
   }
@@ -693,11 +698,13 @@
       } catch(e){}
     });
   }
+  /** Remove hover highlight/scale for the specified verse across views. */
   function unhoverVerse(vnum){
     if (!vnum) return;
     try { _unhoverNodes(_treeClauseNodesByVerse(vnum)); } catch(e){}
     try { _listClauseItemsByVerse(vnum).forEach(el => el.classList.remove('hover-hi')); } catch(e){}
   }
+  /** Clear any active verse hover (cached) and residual classes. */
   function clearVerseHover(){
     if (!tidyContainer) return;
     if (state.lastHoverVerse){ unhoverVerse(state.lastHoverVerse); state.lastHoverVerse = null; }
@@ -722,6 +729,7 @@
       el.classList.add('hover-bumped');
     } catch(e){}
   }
+  /** Apply hover highlight for a verse (tree scale + highlight, list highlight). */
   function setVerseHover(vnum){
     if (!tidyContainer) return;
     try { vnum = parseInt(vnum, 10) || 0; } catch(e){ vnum = 0; }
@@ -736,21 +744,26 @@
   function applyVerseHover(vnum){
     setVerseHover(vnum);
   }
+  /** Build unified versions API URL for fetch. */
   function versionsApiUrl(version, book, chapter){
     return `/api/versions/chapter?version=${encodeURIComponent(String(version||''))}&book=${encodeURIComponent(String(book||''))}&chapter=${encodeURIComponent(String(chapter||''))}`;
   }
+  /** Render loading placeholder into versions panel. */
   function setVersionsPanelLoading(){ if (versionContent) versionContent.innerHTML = `<div class=\"empty\">불러오는 중…</div>`; }
+  /** Render error + retry into versions panel. */
   function setVersionsPanelError(){
     if (!versionContent) return;
     versionContent.innerHTML = `<div class=\"empty\">역본을 불러오지 못했습니다. <button class=\"btn-retry\">다시 시도</button></div>`;
     try { const btn = versionContent.querySelector('.btn-retry'); if (btn) btn.addEventListener('click', ()=> refreshVersionsPanel()); } catch(_){}
   }
+  /** Fetch verses for (version,book,chapter). Returns {verses:Array, ok:boolean}. */
   async function fetchVersionsChapter(version, book, chapter){
     const r = await fetchJsonCached(versionsApiUrl(version, book, chapter));
     const j = r && r.json;
     if (!j || !Array.isArray(j.verses)) return { verses: [], ok: false };
     return { verses: j.verses, ok: true };
   }
+  /** Load panel content by calling fetch helper and rendering or erroring. */
   async function loadVersionsPanel(version, book, chapter){
     try {
       if (!versionsPanel || !versionsPanel.classList.contains('visible')) return false;
@@ -811,9 +824,11 @@
     } catch(e){}
   }
   // --- Verse utils ---
+  /** Parse verse number (int) from a BHSA-like ref string e.g. "GEN 01,03". */
   function verseNumFromRef(vs){
     try{ const m = /\b([A-Z]{3})\s+(\d{2}),(\d{2})/.exec(String(vs||'')); return m ? (parseInt(m[3],10)||null) : null; } catch(e){ return null; }
   }
+  /** Convenience wrapper: parse verse number from a node object. */
   function verseNumFromNode(n){ return verseNumFromRef(n && n.verse); }
   // Backward-compat name (to be phased out)
   function parseNodeVerseNum(vs){ return verseNumFromRef(vs); }
@@ -914,6 +929,11 @@
   function render(){ if (tidyView.classList.contains('visible')) renderTidy(); else renderList(); }
 
   // ---- Tidy helpers ----
+  /**
+   * Given a d3.hierarchy root and selected id, collect neighbor metadata:
+   * - parentId: id of direct parent (for 1.3x scale)
+   * - childIds: set of visible children ids (for 2x scale)
+   */
   function collectNeighbors(root, selectedId){
     let parentId = null; const childIds = new Set();
     if (!selectedId) return { parentId, childIds };
@@ -924,6 +944,7 @@
     return { parentId, childIds };
   }
 
+  /** Apply legend-based fading on nodes and links based on activeCats. */
   function legendFilter(node, linkLayer){
     const active = (state.activeCats && state.activeCats.size) ? new Set(state.activeCats) : null;
     if (!active) return;
@@ -933,12 +954,17 @@
     try { linkLayer.classed('faded', function(d){ return !(include.has(d.source.data.id) && include.has(d.target.data.id)); }); } catch(e){}
   }
 
-  function addTextAndRects(node){
+  /**
+   * Add text labels to each node and, on next frame, measure and insert
+   * rounded rect backgrounds sized to the text. Also raises the selected
+   * node above siblings and decorates labels.
+   */
+  function addTextAndRects(node, labelTextForNodeCb){
     const textSel = node.append('text')
       .attr('dy','0.32em')
       .attr('x', 0)
       .attr('text-anchor', 'middle')
-      .text(d=> labelTextForNode(d));
+      .text(d=> { try { return labelTextForNodeCb ? labelTextForNodeCb(d) : ''; } catch(e){ return ''; } });
     const padX = 8, padY = 4;
     requestAnimationFrame(() => {
       try {
@@ -971,6 +997,7 @@
     return textSel;
   }
 
+  /** Add edge (relation) labels and schedule collision resolution. */
   function addEdgeLabelsAndResolve(g, links){
     const linksWithRela = links.filter(d=>{ const r=d&&d.target&&d.target.data&&d.target.data.rela; return (r&&r!=='NA'); });
     const elabelLayer = g.append('g').attr('class','edge-labels');
@@ -986,6 +1013,10 @@
     return scheduleEdgeLabelResolve;
   }
 
+  /**
+   * Bind zoom behavior and restore previous view anchor/zoom if present.
+   * Returns { zoom, appliedPrev }.
+   */
   function setupZoomAndView(svg, g, baseX, baseY){
     const zoom = d3.zoom().on('zoom', (e)=> { g.attr('transform', e.transform); state.tidyZoom = e.transform; });
     svg.call(zoom);
@@ -1006,6 +1037,7 @@
     return { zoom, appliedPrev };
   }
 
+  /** Render the tidy tree view (hierarchical D3 tree). */
   function renderTidy(){
     // Capture current view anchor before rerender so we can preserve viewpoint
     try { state.viewAnchor = captureViewAnchor(); } catch(e) { /* ignore */ }
@@ -1095,7 +1127,7 @@
       .on('mouseleave', ()=>{ try { clearActiveVerseInPanel(); } catch(e){} });
     // Apply legend filtering (fade non-selected)
     legendFilter(node, linkLayer);
-    const textSel = addTextAndRects(node);
+    const textSel = addTextAndRects(node, labelTextForNode);
 
     // Edge labels (rela) after nodes for visibility and collision-aware placement
     const scheduleEdgeLabelResolve = addEdgeLabelsAndResolve(g, links);
@@ -1198,6 +1230,7 @@
     } catch(e) { /* ignore */ }
   }
 
+  /** Render the indented list view (DOM list, not SVG). */
   function renderList(){
     listContainer.innerHTML=''; if(!state.data) return;
     const ul=document.createElement('ul'); ul.className='indented'; listContainer.appendChild(ul);
@@ -1632,6 +1665,7 @@
   }
 
   // Center view on a specific node id (tidy tree)
+  /** Center tidy view on the node with the given id, preserving current zoom. */
   function centerOnNodeId(id){
     try {
       const svg = state.tidySvg; const z = state.tidyZoom; const zoom = state.tidyZoomBehavior; const base = state.baseTranslate || {x:0,y:0};
