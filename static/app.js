@@ -11,6 +11,7 @@
     selectedId: null,
     anchorMode: 'center',
     fitDoneFor: new Set(),
+    lastHoverVerse: null,
   };
   const elBook = document.getElementById('book');
   const elChapter = document.getElementById('chapter');
@@ -674,9 +675,15 @@
   function bookLabelName(val){
     try { return (elBook.options[elBook.selectedIndex] || {}).textContent || val || ''; } catch(e){ return val || ''; }
   }
-  function clearVerseHover(){
-    if (!tidyContainer) return;
-    tidyContainer.querySelectorAll('g.tree-node.hover-bumped, g.tree-node.hover-hi').forEach(el => {
+  // --- Hover helpers (unified) ---
+  function _treeClauseNodesByVerse(vnum){
+    try { return tidyContainer.querySelectorAll(`g.tree-node[data-verse-num="${vnum}"][data-has-ctype="1"]`); } catch(e){ return []; }
+  }
+  function _listClauseItemsByVerse(vnum){
+    try { return listContainer.querySelectorAll(`li.node-item[data-verse-num="${vnum}"][data-has-ctype="1"]`); } catch(e){ return []; }
+  }
+  function _unhoverNodes(nodes){
+    nodes.forEach(el => {
       try {
         const base = el.getAttribute('data-tf-base');
         if (base) el.setAttribute('transform', base);
@@ -685,6 +692,23 @@
         el.classList.remove('hover-hi');
       } catch(e){}
     });
+  }
+  function unhoverVerse(vnum){
+    if (!vnum) return;
+    try { _unhoverNodes(_treeClauseNodesByVerse(vnum)); } catch(e){}
+    try { _listClauseItemsByVerse(vnum).forEach(el => el.classList.remove('hover-hi')); } catch(e){}
+  }
+  function clearVerseHover(){
+    if (!tidyContainer) return;
+    if (state.lastHoverVerse){ unhoverVerse(state.lastHoverVerse); state.lastHoverVerse = null; }
+    // Best-effort cleanup in case of re-renders
+    try {
+      tidyContainer.querySelectorAll('g.tree-node.hover-bumped, g.tree-node.hover-hi').forEach(el => {
+        const base = el.getAttribute('data-tf-base'); if (base) el.setAttribute('transform', base);
+        el.removeAttribute('data-tf-base'); el.classList.remove('hover-bumped'); el.classList.remove('hover-hi');
+      });
+      listContainer.querySelectorAll('li.node-item.hover-hi').forEach(el => el.classList.remove('hover-hi'));
+    } catch(e){}
   }
   function bumpScale(el, mul){
     try{
@@ -698,15 +722,19 @@
       el.classList.add('hover-bumped');
     } catch(e){}
   }
-  function applyVerseHover(vnum){
+  function setVerseHover(vnum){
     if (!tidyContainer) return;
-    clearVerseHover();
-    const nodes = tidyContainer.querySelectorAll(`g.tree-node[data-verse-num="${vnum}"][data-has-ctype="1"]`);
+    try { vnum = parseInt(vnum, 10) || 0; } catch(e){ vnum = 0; }
+    if (!vnum){ clearVerseHover(); return; }
+    if (state.lastHoverVerse === vnum) return;
+    if (state.lastHoverVerse){ unhoverVerse(state.lastHoverVerse); }
+    const nodes = _treeClauseNodesByVerse(vnum);
     nodes.forEach(el => { bumpScale(el, 1.25); try { el.classList.add('hover-hi'); } catch(e){} });
-    try {
-      const lis = listContainer.querySelectorAll(`li.node-item[data-verse-num="${vnum}"][data-has-ctype="1"]`);
-      lis.forEach(el => el.classList.add('hover-hi'));
-    } catch(e){}
+    try { _listClauseItemsByVerse(vnum).forEach(el => el.classList.add('hover-hi')); } catch(e){}
+    state.lastHoverVerse = vnum;
+  }
+  function applyVerseHover(vnum){
+    setVerseHover(vnum);
   }
   async function refreshVersionsPanel(){
     try {
