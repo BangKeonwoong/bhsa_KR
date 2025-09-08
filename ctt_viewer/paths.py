@@ -50,4 +50,41 @@ def knt_dir() -> Path:
     e = os.environ.get('KNT_DIR')
     if e and Path(e).exists():
         return Path(e)
-    return project_root() / "KNT"
+    # Prefer consolidated versions/ layout if present
+    vr = os.environ.get('VERSIONS_DIR')
+    if vr and (Path(vr) / 'KNT').exists():
+        return Path(vr) / 'KNT'
+    cand = project_root() / 'versions' / 'KNT'
+    if cand.exists():
+        return cand
+    # Fallback to legacy top-level folder
+    return project_root() / 'KNT'
+
+
+def versions_root() -> Path:
+    e = os.environ.get('VERSIONS_DIR')
+    if e and Path(e).exists():
+        return Path(e)
+    return project_root() / 'versions'
+
+
+def nkrv_dir() -> Path:
+    e = os.environ.get('NKRV_DIR')
+    if e and Path(e).exists():
+        return Path(e)
+    vr = versions_root() / 'NKRV'
+    if vr.exists():
+        return vr
+    # Legacy fallback (rare)
+    return project_root() / 'NKRV'
+
+
+def bhs_dir() -> Path:
+    e = os.environ.get('BHS_DIR')
+    if e and Path(e).exists():
+        return Path(e)
+    vr = versions_root() / 'BHS'
+    if vr.exists():
+        return vr
+    # Legacy fallback
+    return project_root() / 'BHS'
