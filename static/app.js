@@ -789,9 +789,13 @@
       if (detailsResizer) detailsResizer.classList.add('visible');
     } catch(e){}
   }
-  function parseNodeVerseNum(vs){
+  // --- Verse utils ---
+  function verseNumFromRef(vs){
     try{ const m = /\b([A-Z]{3})\s+(\d{2}),(\d{2})/.exec(String(vs||'')); return m ? (parseInt(m[3],10)||null) : null; } catch(e){ return null; }
   }
+  function verseNumFromNode(n){ return verseNumFromRef(n && n.verse); }
+  // Backward-compat name (to be phased out)
+  function parseNodeVerseNum(vs){ return verseNumFromRef(vs); }
   function isClauseNode(n){ return !!(n && n.ctype); }
   function findFirstClauseNodeForVerse(vnum){
     let found = null;
@@ -800,7 +804,7 @@
       walk(state.data, (n)=>{
         if (found) return;
         if (!n) return;
-        const vn = parseNodeVerseNum(n.verse);
+        const vn = verseNumFromNode(n);
         if (vn === vnum && isClauseNode(n)) found = n;
       });
     } catch(e){}
@@ -888,31 +892,110 @@
 
   function render(){ if (tidyView.classList.contains('visible')) renderTidy(); else renderList(); }
 
+  // ---- Tidy helpers ----
+  function collectNeighbors(root, selectedId){
+    let parentId = null; const childIds = new Set();
+    if (!selectedId) return { parentId, childIds };
+    let sel = null; try { root.each(n => { if (n && n.data && n.data.id === selectedId) sel = n; }); } catch(e){}
+    if (!sel) return { parentId, childIds };
+    try { if (sel.parent && sel.parent.data) parentId = sel.parent.data.id; } catch(e){}
+    try { (sel.children || []).forEach(ch => { if (ch && ch.data) childIds.add(ch.data.id); }); } catch(e){}
+    return { parentId, childIds };
+  }
+
+  function legendFilter(node, linkLayer){
+    const active = (state.activeCats && state.activeCats.size) ? new Set(state.activeCats) : null;
+    if (!active) return;
+    const include = new Set();
+    try { node.each(function(d){ const cat = clauseClass(d.data); if (active.has(cat)) include.add(d.data.id); }); } catch(e){}
+    try { node.classed('faded', function(d){ return !include.has(d.data.id); }); } catch(e){}
+    try { linkLayer.classed('faded', function(d){ return !(include.has(d.source.data.id) && include.has(d.target.data.id)); }); } catch(e){}
+  }
+
+  function addTextAndRects(node){
+    const textSel = node.append('text')
+      .attr('dy','0.32em')
+      .attr('x', 0)
+      .attr('text-anchor', 'middle')
+      .text(d=> labelTextForNode(d));
+    const padX = 8, padY = 4;
+    requestAnimationFrame(() => {
+      try {
+        textSel.each(function(d){
+          try {
+            const bbox = this.getBBox();
+            const w = Math.max(10, bbox.width + padX*2);
+            const h = Math.max(16, bbox.height + padY*2);
+            const rx = -w/2; const ry = -h/2;
+            d3.select(this.parentNode).insert('rect','text')
+              .attr('class','node-rect ' + clauseClass(d && d.data))
+              .attr('x', rx).attr('y', ry).attr('width', w).attr('height', h);
+            d3.select(this).attr('x', 0).attr('dy', '0.32em');
+          } catch (e) {
+            const name = (d && d.data && d.data.name) ? d.data.name : '';
+            const w = Math.max(40, name.length * 6) + padX*2; const h = 18 + padY*2; const rx = -w/2; const ry = -h/2;
+            d3.select(this.parentNode).insert('rect','text')
+              .attr('class','node-rect ' + clauseClass(d && d.data))
+              .attr('x', rx).attr('y', ry).attr('width', w).attr('height', h);
+            d3.select(this).attr('x', 0).attr('dy', '0.32em');
+          }
+        });
+        try { node.selectAll('rect.node-rect').classed('hl', function(d){ const cat = clauseClass(d && d.data); return !!(state.highlightCats && state.highlightCats.has(cat)); }); } catch(e){}
+        // Raise selected node to top
+        try { if (state.selectedId){ node.each(function(d){ try { if (d && d.data && d.data.id === state.selectedId) { const p = this.parentNode; if (p) p.appendChild(this); } } catch(e){} }); } } catch(e){}
+        // Decorate labels
+        try { textSel.each(function(d){ try { decorateTidyNodeLabel(this, d && d.data); } catch(e){} }); } catch(e){}
+      } catch(e){}
+    });
+    return textSel;
+  }
+
+  function addEdgeLabelsAndResolve(g, links){
+    const linksWithRela = links.filter(d=>{ const r=d&&d.target&&d.target.data&&d.target.data.rela; return (r&&r!=='NA'); });
+    const elabelLayer = g.append('g').attr('class','edge-labels');
+    const elGroups = elabelLayer.selectAll('g').data(linksWithRela).join('g').attr('class','edge-label-group');
+    elGroups.each(function(d){ const r = d.target.data.rela; d3.select(this).append('text').attr('class', `edge-label ${classForRela(r)}`).attr('text-anchor','middle').text(r); });
+    let edgeLabelIdle;
+    function scheduleEdgeLabelResolve(){
+      if (edgeLabelIdle) { try { cancelIdleCallback(edgeLabelIdle); } catch(e) { clearTimeout(edgeLabelIdle); } }
+      const run = ()=> { try { resolveEdgeLabelCollisions(elGroups.nodes(), g.node(), state.orientation); } catch(e){} };
+      try { edgeLabelIdle = requestIdleCallback(run, { timeout: 120 }); } catch(e) { edgeLabelIdle = setTimeout(run, 60); }
+    }
+    scheduleEdgeLabelResolve();
+    return scheduleEdgeLabelResolve;
+  }
+
+  function setupZoomAndView(svg, g, baseX, baseY){
+    const zoom = d3.zoom().on('zoom', (e)=> { g.attr('transform', e.transform); state.tidyZoom = e.transform; });
+    svg.call(zoom);
+    try { state.tidyZoomBehavior = zoom; state.tidySvg = svg.node(); } catch(e){}
+    let appliedPrev = false;
+    try {
+      if (state.viewAnchor && typeof state.viewAnchor.x === 'number' && typeof state.viewAnchor.y === 'number'){
+        const k = (state.viewAnchor.k && isFinite(state.viewAnchor.k)) ? state.viewAnchor.k : 1;
+        const rect2 = (svg && svg.node && svg.node().getBoundingClientRect) ? svg.node().getBoundingClientRect() : tidyContainer.getBoundingClientRect();
+        const cx2 = Math.max(0, rect2.width/2); const cy2 = Math.max(0, rect2.height/2);
+        const tx = cx2 - baseX - k*state.viewAnchor.x; const ty = cy2 - baseY - k*state.viewAnchor.y;
+        const t = d3.zoomIdentity.translate(tx, ty).scale(k);
+        svg.call(zoom.transform, t);
+        state.tidyZoom = t; appliedPrev = true;
+      }
+    } catch(e) { appliedPrev = false; }
+    state.baseTranslate = { x: baseX, y: baseY };
+    return { zoom, appliedPrev };
+  }
+
   function renderTidy(){
     // Capture current view anchor before rerender so we can preserve viewpoint
     try { state.viewAnchor = captureViewAnchor(); } catch(e) { /* ignore */ }
     tidyContainer.innerHTML=''; if (!state.data) return;
-    // Active-only fading uses highlight set
-    state.activeCats = (state.activeOnly && state.highlightCats && state.highlightCats.size)
-      ? new Set(state.highlightCats)
-      : null;
+    state.activeCats = (state.activeOnly && state.highlightCats && state.highlightCats.size) ? new Set(state.highlightCats) : null;
     const data = deepClone(state.data); applyCollapsed(data);
     const root = d3.hierarchy(data);
-    // Collect neighbor info: parent id (1.3x) and visible child ids (2x)
-    const neighbors = (function collectNeighbors(selId){
-      let parentId = null; const childIds = new Set();
-      if (!selId) return { parentId, childIds };
-      let sel = null; root.each(n => { if (n && n.data && n.data.id === selId) sel = n; });
-      if (!sel) return { parentId, childIds };
-      if (sel.parent && sel.parent.data) parentId = sel.parent.data.id;
-      (sel.children || []).forEach(ch => { if (ch && ch.data) childIds.add(ch.data.id); });
-      return { parentId, childIds };
-    })(state.selectedId);
+    const neighbors = collectNeighbors(root, state.selectedId);
     // Spacing controlled by slider
     const baseSpacing = state.spacing || 280;
-    // Adjust both vertical and horizontal spacing together
     const dy = baseSpacing; // depth spacing (left-right when horizontal, top-bottom when vertical)
-    // Reduce baseline sibling spacing to tighten vertical gaps; scale with slider
     const dx = Math.max(12, Math.round(baseSpacing / 14)); // sibling spacing base (px)
     function labelTextForNode(d){
       if (!d || !d.data) return '';
@@ -987,129 +1070,18 @@
         return !!(state.selectedId && neighbors && neighbors.childIds && neighbors.childIds.has(id));
       })
       .on('click', (ev, d)=> { if (state.showDetails) { ev.stopPropagation(); showDetails(d.data); } else { toggleNode(d.data); } })
-      .on('mouseenter', (ev, d)=>{ try { const v = parseNodeVerseNum(d && d.data && d.data.verse); if (v) setActiveVerseInPanel(v, false); } catch(e){} })
+      .on('mouseenter', (ev, d)=>{ try { const v = verseNumFromNode(d && d.data); if (v) setActiveVerseInPanel(v, false); } catch(e){} })
       .on('mouseleave', ()=>{ try { clearActiveVerseInPanel(); } catch(e){} });
     // Apply legend filtering (fade non-selected)
-    const active = (state.activeCats && state.activeCats.size) ? new Set(state.activeCats) : null;
-    if (active){
-      const include = new Set();
-      node.each(function(d){ const cat = clauseClass(d.data); if (active.has(cat)) include.add(d.data.id); });
-      node.classed('faded', function(d){ return !include.has(d.data.id); });
-      linkLayer.classed('faded', function(d){ return !(include.has(d.source.data.id) && include.has(d.target.data.id)); });
-    }
-    // Draw text first (pass 1)
-    const textSel = node.append('text')
-      .attr('dy','0.32em')
-      .attr('x', 0)
-      .attr('text-anchor', 'middle')
-      .text(d=> labelTextForNode(d));
-    // Pass 2: measure and insert rects on next frame (safe guard + fallback)
-    const padX = 8, padY = 4;
-    requestAnimationFrame(() => {
-      try {
-        textSel.each(function(d){
-          try {
-            const bbox = this.getBBox();
-            const w = Math.max(10, bbox.width + padX*2);
-            const h = Math.max(16, bbox.height + padY*2);
-            const rx = -w/2;
-            const ry = -h/2;
-            const rect = d3.select(this.parentNode)
-              .insert('rect','text')
-              .attr('class','node-rect ' + clauseClass(d && d.data))
-              .attr('x', rx)
-              .attr('y', ry)
-              .attr('width', w)
-              .attr('height', h);
-            // Center text horizontally (anchor=middle)
-            d3.select(this).attr('x', 0).attr('dy', '0.32em');
-          } catch (e) {
-            const name = (d && d.data && d.data.name) ? d.data.name : '';
-            const w = Math.max(40, name.length * 6) + padX*2;
-            const h = 18 + padY*2;
-            const rx = -w/2;
-            const ry = -h/2;
-            d3.select(this.parentNode)
-              .insert('rect','text')
-              .attr('class','node-rect ' + clauseClass(d && d.data))
-              .attr('x', rx)
-              .attr('y', ry)
-              .attr('width', w)
-              .attr('height', h);
-            d3.select(this).attr('x', 0).attr('dy', '0.32em');
-          }
-        });
-        // Apply highlight class to rects for selected categories
-        try {
-          node.selectAll('rect.node-rect').classed('hl', function(d){
-            const cat = clauseClass(d && d.data);
-            return !!(state.highlightCats && state.highlightCats.has(cat));
-          });
-        } catch(e) { /* ignore */ }
-      } catch (e) {
-        // swallow
-      }
-      // Ensure selected node is visually above other nodes by moving its group last
-      try {
-        if (state.selectedId){
-          node.each(function(d){
-            try { if (d && d.data && d.data.id === state.selectedId) { const p = this.parentNode; if (p) p.appendChild(this); } } catch(e){}
-          });
-        }
-      } catch(e){}
-      // After initial rects, decorate labels with subject/predicate coloring
-      try {
-        textSel.each(function(d){ try { decorateTidyNodeLabel(this, d && d.data); } catch(e){} });
-      } catch(e){}
-    });
+    legendFilter(node, linkLayer);
+    const textSel = addTextAndRects(node);
 
     // Edge labels (rela) after nodes for visibility and collision-aware placement
-    const linksWithRela = links.filter(d=>{
-      const r=d&&d.target&&d.target.data&&d.target.data.rela; return (r&&r!=='NA');
-    });
-    const elabelLayer = g.append('g').attr('class','edge-labels');
-    const elGroups = elabelLayer.selectAll('g').data(linksWithRela).join('g').attr('class','edge-label-group');
-    elGroups.each(function(d){
-      const r = d.target.data.rela;
-      const grp = d3.select(this);
-      grp.append('text').attr('class', `edge-label ${classForRela(r)}`)
-        .attr('text-anchor','middle')
-        .text(r);
-    });
-
-    // Schedule collision resolution lazily to speed first paint
-    let edgeLabelIdle;
-    function scheduleEdgeLabelResolve(){
-      if (edgeLabelIdle) { try { cancelIdleCallback(edgeLabelIdle); } catch(e) { clearTimeout(edgeLabelIdle); } }
-      const run = ()=> { try { resolveEdgeLabelCollisions(elGroups.nodes(), g.node(), state.orientation); } catch(e){} };
-      try { edgeLabelIdle = requestIdleCallback(run, { timeout: 120 }); } catch(e) { edgeLabelIdle = setTimeout(run, 60); }
-    }
-    scheduleEdgeLabelResolve();
+    const scheduleEdgeLabelResolve = addEdgeLabelsAndResolve(g, links);
     // Zoom behavior with view preservation
-    const zoom = d3.zoom().on('zoom', (e)=> {
-      g.attr('transform', e.transform);
-      state.tidyZoom = e.transform;
-    }).on('end', ()=> { scheduleEdgeLabelResolve(); });
-    svg.call(zoom);
-    // expose zoom behavior + svg node for programmatic transforms
-    try { state.tidyZoomBehavior = zoom; state.tidySvg = svg.node(); } catch(e) { /* ignore */ }
-    // Re-apply previous view anchored at screen center with same zoom
-    let appliedPrev = false;
-    try {
-      if (state.viewAnchor && typeof state.viewAnchor.x === 'number' && typeof state.viewAnchor.y === 'number'){
-        const k = (state.viewAnchor.k && isFinite(state.viewAnchor.k)) ? state.viewAnchor.k : 1;
-        const rect2 = (svg && svg.node && svg.node().getBoundingClientRect) ? svg.node().getBoundingClientRect() : tidyContainer.getBoundingClientRect();
-        const cx2 = Math.max(0, rect2.width/2);
-        const cy2 = Math.max(0, rect2.height/2);
-        const tx = cx2 - baseX - k*state.viewAnchor.x;
-        const ty = cy2 - baseY - k*state.viewAnchor.y;
-        const t = d3.zoomIdentity.translate(tx, ty).scale(k);
-        svg.call(zoom.transform, t);
-        state.tidyZoom = t;
-        appliedPrev = true;
-      }
-    } catch(e) { appliedPrev = false; }
-    state.baseTranslate = { x: baseX, y: baseY };
+    const { zoom, appliedPrev } = setupZoomAndView(svg, g, baseX, baseY);
+    try { svg.on('end', null); } catch(e){}
+    try { zoom.on('end', ()=> { scheduleEdgeLabelResolve(); }); } catch(e){}
 
     // Initial fit to content area on first load of a chapter
     try {
