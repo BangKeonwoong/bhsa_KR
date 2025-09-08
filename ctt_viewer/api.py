@@ -170,6 +170,36 @@ def read_knt_verse(book_label: str, chapter: int, verse: int) -> Optional[str]:
     return None
 
 
+def read_knt_chapter(book_label: str, chapter: int) -> Optional[list[dict]]:
+    """Read all verses of a chapter from KNT Markdown under KNT/<책>/CC.md.
+
+    Each verse line looks like: '- 3: 텍스트...'
+    Returns a list of {verse:int, text:str} or None if file missing.
+    """
+    ko_dir = KNT_LABEL_TO_KO.get(book_label.upper())
+    if not ko_dir:
+        return None
+    path = knt_dir() / ko_dir / f"{chapter:02d}.md"
+    if not path.exists():
+        return None
+    pat = re.compile(r"^\s*-\s*(\d+)\s*:\s*(.*)$")
+    verses: list[dict] = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                m = pat.match(line)
+                if not m:
+                    continue
+                try:
+                    v = int(m.group(1))
+                except Exception:
+                    continue
+                verses.append({"verse": v, "text": m.group(2).strip()})
+    except Exception:
+        return None
+    return verses
+
+
 @lru_cache(maxsize=LRU_TREE_CACHE)
 def _tree_payload_cached(book_param: str, chapter: int, requested: str, lite: bool, bhsa_avail: bool, max_depth: int) -> tuple[str, str, Optional[str]]:
     book = (book_param or '').strip().lower()
@@ -440,6 +470,33 @@ def api_knt_verse():
     if text is None:
         return jsonify({"error": "not found"}), 404
     payload = json.dumps({"book_label": label, "chapter": chapter, "verse": verse, "text": text}, ensure_ascii=False, separators=(",", ":"))
+    etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+    inm = request.headers.get('If-None-Match', '')
+    lm = _latest_ctt_mtime(kpath)
+    if _is_nocache():
+        return resp_json(payload, etag, lm, 0, 0)
+    ma, swr = _cache_cfg()
+    if inm and (etag in inm):
+        return resp_304(etag, lm, ma, swr)
+    return resp_json(payload, etag, lm, ma, swr)
+
+
+@api_bp.get("/api/knt/chapter")
+def api_knt_chapter():
+    book = request.args.get("book", "").strip()
+    try:
+        chapter = int(request.args.get("chapter", "0") or 0)
+    except Exception:
+        chapter = 0
+    label = resolve_book_label(book)
+    if not label or not chapter:
+        return jsonify({"error": "invalid parameters"}), 400
+    ko_dir = KNT_LABEL_TO_KO.get(label.upper())
+    kpath = (knt_dir() / ko_dir / f"{chapter:02d}.md") if ko_dir else None
+    data = read_knt_chapter(label, chapter)
+    if data is None:
+        return jsonify({"error": "not found"}), 404
+    payload = json.dumps({"book_label": label, "chapter": chapter, "verses": data}, ensure_ascii=False, separators=(",", ":"))
     etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
     inm = request.headers.get('If-None-Match', '')
     lm = _latest_ctt_mtime(kpath)

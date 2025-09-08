@@ -84,6 +84,7 @@
       <label>
         <input id="toggleDetails" type="checkbox" /> 상세 보기
       </label>
+      <button id="toggleVersions" title="역본 보기 패널">역본</button>
     </div>
   </header>
 
@@ -97,6 +98,19 @@
     <div id="detailsResizer" class="resizer horizontal" title="드래그하여 상세 높이 조절"></div>
     <section id="detailsPanel" class="details"></section>
     <aside id="legendPanel" class="legend"></aside>
+    <aside id="versionsPanel" class="versions" aria-label="역본 패널" aria-hidden="true">
+      <div class="vp-header">
+        <strong>역본</strong>
+        <select id="versionSelect">
+          <option value="knt">KNT</option>
+        </select>
+        <button id="closeVersions" class="icon-btn" title="닫기">×</button>
+      </div>
+      <div class="vp-subhead">
+        <span id="vpRef">-</span>
+      </div>
+      <div id="versionContent" class="versions-content"></div>
+    </aside>
   </main>
 
   <footer class="footer">

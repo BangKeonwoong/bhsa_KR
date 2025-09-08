@@ -35,6 +35,13 @@
   const detailsPanel = document.getElementById('detailsPanel');
   const detailsResizer = document.getElementById('detailsResizer');
   const legendPanel = document.getElementById('legendPanel');
+  // Versions side panel elements
+  const btnVersions = document.getElementById('toggleVersions');
+  const versionsPanel = document.getElementById('versionsPanel');
+  const selVersion = document.getElementById('versionSelect');
+  const versionContent = document.getElementById('versionContent');
+  const btnCloseVersions = document.getElementById('closeVersions');
+  const vpRef = document.getElementById('vpRef');
   const depthRange = document.getElementById('depthRange');
   const depthValue = document.getElementById('depthValue');
   const spacingRange = document.getElementById('spacingRange');
@@ -223,6 +230,14 @@
     } catch(e) { /* ignore */ }
     render();
   });
+  // Versions toggle + controls
+  if (btnVersions) btnVersions.addEventListener('click', ()=> {
+    const on = !(versionsPanel && versionsPanel.classList.contains('visible'));
+    if (versionsPanel){ versionsPanel.classList.toggle('visible', on); versionsPanel.setAttribute('aria-hidden', on? 'false':'true'); }
+    if (on) refreshVersionsPanel(); else clearVerseHover();
+  });
+  if (btnCloseVersions) btnCloseVersions.addEventListener('click', ()=> { if (versionsPanel){ versionsPanel.classList.remove('visible'); versionsPanel.setAttribute('aria-hidden','true'); } clearVerseHover(); });
+  if (selVersion) selVersion.addEventListener('change', ()=> { refreshVersionsPanel(); try { setPref('versionPanel:selected', selVersion.value||''); } catch(e){} });
   window.addEventListener('resize', () => {
     if (tidyView.classList.contains('visible')) renderTidy();
   });
@@ -573,6 +588,8 @@
     hideSpinner();
     // Ensure resizer visibility matches panel state on first load
     if (detailsResizer){ detailsResizer.classList.toggle('visible', !!state.showDetails); }
+    // If versions panel is open, sync its content with current book/chapter
+    try { await refreshVersionsPanel(); } catch(e){}
   }
 
   function hasAnyGloss(root){
@@ -597,6 +614,74 @@
       render();
     }catch(e){ render(); showToast('상세 불러오기 실패', 'err'); }
     finally { hideSpinner(); }
+  }
+
+  // ---- Versions panel support ----
+  function bookLabelName(val){
+    try { return (elBook.options[elBook.selectedIndex] || {}).textContent || val || ''; } catch(e){ return val || ''; }
+  }
+  function clearVerseHover(){
+    if (!tidyContainer) return;
+    tidyContainer.querySelectorAll('g.tree-node.hover-bumped').forEach(el => {
+      try {
+        const base = el.getAttribute('data-tf-base');
+        if (base) el.setAttribute('transform', base);
+        el.removeAttribute('data-tf-base');
+        el.classList.remove('hover-bumped');
+      } catch(e){}
+    });
+  }
+  function bumpScale(el, mul){
+    try{
+      let base = el.getAttribute('data-tf-base');
+      if (!base){ base = el.getAttribute('transform') || ''; el.setAttribute('data-tf-base', base); }
+      const m = base.match(/translate\(([^)]*)\)\s*(?:scale\(([^)]*)\))?/);
+      const pos = m ? m[1] : '0,0';
+      const s0 = m && m[2] ? parseFloat(m[2]) : 1;
+      const s1 = isFinite(s0) ? s0 * mul : mul;
+      el.setAttribute('transform', `translate(${pos}) scale(${s1})`);
+      el.classList.add('hover-bumped');
+    } catch(e){}
+  }
+  function applyVerseHover(vnum){
+    if (!tidyContainer) return;
+    clearVerseHover();
+    const nodes = tidyContainer.querySelectorAll(`g.tree-node[data-verse-num="${vnum}"][data-has-ctype="1"]`);
+    nodes.forEach(el => bumpScale(el, 1.25));
+  }
+  async function refreshVersionsPanel(){
+    try {
+      if (!versionsPanel || !versionsPanel.classList.contains('visible')) return;
+      const ver = (selVersion && selVersion.value) || 'knt';
+      const book = elBook.value || 'genesis';
+      const chapter = parseInt(elChapter.value || '1', 10) || 1;
+      if (vpRef) vpRef.textContent = `${bookLabelName(book)} ${chapter}`;
+      if (ver === 'knt'){
+        const r = await fetchJsonCached(`/api/knt/chapter?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}`);
+        const j = r && r.json;
+        const verses = j && Array.isArray(j.verses) ? j.verses : [];
+        renderVersionsContentKNT(verses);
+      } else {
+        if (versionContent) versionContent.innerHTML = `<div class=\"empty\">지원되지 않는 역본입니다.</div>`;
+      }
+    } catch(e){ if (versionContent) versionContent.innerHTML = `<div class=\"empty\">역본을 불러오지 못했습니다.</div>`; }
+  }
+  function renderVersionsContentKNT(verses){
+    if (!versionContent) return;
+    if (!verses || !verses.length){ versionContent.innerHTML = `<div class=\"empty\">이 장의 텍스트가 없습니다.</div>`; return; }
+    const html = verses.map(v => {
+      const num = v && typeof v.verse==='number' ? v.verse : null;
+      const tx = (v && v.text) ? String(v.text) : '';
+      return `<div class=\"verse-item\" data-verse=\"${num||''}\"><span class=\"vnum\">${num||''}</span><div class=\"vtext\">${escapeHtml(tx)}</div></div>`;
+    }).join('');
+    versionContent.innerHTML = html;
+    versionContent.querySelectorAll('.verse-item').forEach(el => {
+      el.addEventListener('mouseenter', () => {
+        const num = parseInt(el.getAttribute('data-verse')||'0',10)||0;
+        if (num>0) applyVerseHover(num);
+      });
+      el.addEventListener('mouseleave', () => { clearVerseHover(); });
+    });
   }
 
   // --- Details resizer (drag to set height) ---
@@ -730,6 +815,8 @@
         : linkGen({source:{x:d.source.x,y:d.source.y},target:{x:d.target.x,y:d.target.y}}));
     // Nodes layer
     const node=g.append('g').selectAll('g').data(root.descendants()).join('g').attr('class','tree-node')
+      .attr('data-verse-num', d => { try { const m = String(d && d.data && d.data.verse || '').match(/^[A-Z]{3}\s+\d{2},(\d{2})/); return m ? String(parseInt(m[1],10)||'') : ''; } catch(e){ return ''; } })
+      .attr('data-has-ctype', d => (d && d.data && d.data.ctype) ? '1' : '')
       .attr('transform', d=> {
         const pos = (state.orientation==='horizontal'? `translate(${d.y},${d.x})`: `translate(${d.x},${d.y})`);
         const id = d && d.data ? d.data.id : undefined;
