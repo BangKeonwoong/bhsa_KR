@@ -209,6 +209,116 @@ def read_knt_chapter(book_label: str, chapter: int) -> Optional[list[dict]]:
     return verses
 
 
+def _find_nkrv_book_dir(label: str) -> Optional[Path]:
+    """Find NKRV directory like '01-창세기' by KO book name."""
+    try:
+        root = nkrv_dir()
+        if not root.exists():
+            return None
+        ko = KNT_LABEL_TO_KO.get(label.upper())
+        if not ko:
+            return None
+        best = None
+        for p in root.iterdir():
+            if not p.is_dir():
+                continue
+            name = p.name
+            base = name.split('-', 1)[-1] if '-' in name else name
+            if base == ko:
+                best = p
+                break
+        return best
+    except Exception:
+        return None
+
+
+def read_nkrv_chapter(book_label: str, chapter: int) -> Optional[list[dict]]:
+    """Parse NKRV chapter file: lines '3. 텍스트'"""
+    d = _find_nkrv_book_dir(book_label)
+    if not d:
+        return None
+    path = d / f"{chapter:03d}.md"
+    if not path.exists():
+        return None
+    verses: list[dict] = []
+    pat = re.compile(r"^\s*(\d+)\s*\.\s*(.+)$")
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = pat.match(line)
+                if not m:
+                    continue
+                try:
+                    v = int(m.group(1))
+                except Exception:
+                    continue
+                verses.append({"verse": v, "text": m.group(2).strip()})
+    except Exception:
+        return None
+    return verses
+
+
+def _find_bhs_book_dir(label: str) -> Optional[Path]:
+    """Find BHS directory like '26 Ezekiel' by English name."""
+    try:
+        root = bhs_dir()
+        if not root.exists():
+            return None
+        en = BOOK_LABEL_TO_NAME.get(label.upper())
+        if not en:
+            return None
+        en_low = en.lower()
+        for p in root.iterdir():
+            if not p.is_dir():
+                continue
+            name = p.name.lower()
+            # allow prefix numbers and space
+            if name.endswith(en_low):
+                return p
+        return None
+    except Exception:
+        return None
+
+
+def read_bhs_chapter(book_label: str, chapter: int) -> Optional[list[dict]]:
+    """Parse BHS chapter markdown with optional front-matter.
+
+    After front-matter '---' blocks, lines look like '3 <text>' (Hebrew with spaces/tags).
+    """
+    d = _find_bhs_book_dir(book_label)
+    if not d:
+        return None
+    path = d / f"{chapter:02d}.md"
+    if not path.exists():
+        return None
+    verses: list[dict] = []
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            lines = f.read().splitlines()
+        # Skip front-matter if present
+        i = 0
+        if i < len(lines) and lines[i].strip() == '---':
+            i += 1
+            while i < len(lines) and lines[i].strip() != '---':
+                i += 1
+            if i < len(lines) and lines[i].strip() == '---':
+                i += 1
+        pat = re.compile(r"^\s*(\d+)\s+(.+)$")
+        for j in range(i, len(lines)):
+            line = lines[j]
+            m = pat.match(line)
+            if not m:
+                continue
+            try:
+                v = int(m.group(1))
+            except Exception:
+                continue
+            verses.append({"verse": v, "text": m.group(2).strip()})
+    except Exception:
+        return None
+    return verses
+
+
 @lru_cache(maxsize=LRU_TREE_CACHE)
 def _tree_payload_cached(book_param: str, chapter: int, requested: str, lite: bool, bhsa_avail: bool, max_depth: int) -> tuple[str, str, Optional[str]]:
     book = (book_param or '').strip().lower()
@@ -552,8 +662,40 @@ def api_versions_chapter():
         if inm and (etag in inm):
             return resp_304(etag, lm, ma, swr)
         return resp_json(payload, etag, lm, ma, swr)
-    elif ver in ('nkrv', 'bhs'):
-        return jsonify({"error": "version_not_supported_yet", "message": f"{ver} will be added soon"}), 501
+    elif ver == 'nkrv':
+        data = read_nkrv_chapter(label, chapter)
+        # Find path for Last-Modified
+        ko_dir = KNT_LABEL_TO_KO.get(label.upper())
+        pdir = _find_nkrv_book_dir(label)
+        p = (pdir / f"{chapter:03d}.md") if pdir else None
+        if data is None:
+            return jsonify({"error": "not found"}), 404
+        payload = json.dumps({"version": "nkrv", "book_label": label, "chapter": chapter, "verses": data}, ensure_ascii=False, separators=(",", ":"))
+        etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+        inm = request.headers.get('If-None-Match', '')
+        lm = _mtime_httpdate(p)
+        if _is_nocache():
+            return resp_json(payload, etag, lm, 0, 0)
+        ma, swr = _cache_cfg()
+        if inm and (etag in inm):
+            return resp_304(etag, lm, ma, swr)
+        return resp_json(payload, etag, lm, ma, swr)
+    elif ver == 'bhs':
+        data = read_bhs_chapter(label, chapter)
+        pdir = _find_bhs_book_dir(label)
+        p = (pdir / f"{chapter:02d}.md") if pdir else None
+        if data is None:
+            return jsonify({"error": "not found"}), 404
+        payload = json.dumps({"version": "bhs", "book_label": label, "chapter": chapter, "verses": data}, ensure_ascii=False, separators=(",", ":"))
+        etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+        inm = request.headers.get('If-None-Match', '')
+        lm = _mtime_httpdate(p)
+        if _is_nocache():
+            return resp_json(payload, etag, lm, 0, 0)
+        ma, swr = _cache_cfg()
+        if inm and (etag in inm):
+            return resp_304(etag, lm, ma, swr)
+        return resp_json(payload, etag, lm, ma, swr)
     else:
         return jsonify({"error": "unknown_version"}), 400
 
