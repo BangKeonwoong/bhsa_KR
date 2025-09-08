@@ -1016,6 +1016,14 @@
       } catch (e) {
         // swallow
       }
+      // Ensure selected node is visually above other nodes by moving its group last
+      try {
+        if (state.selectedId){
+          node.each(function(d){
+            try { if (d && d.data && d.data.id === state.selectedId) { const p = this.parentNode; if (p) p.appendChild(this); } } catch(e){}
+          });
+        }
+      } catch(e){}
       // After initial rects, decorate labels with subject/predicate coloring
       try {
         textSel.each(function(d){ try { decorateTidyNodeLabel(this, d && d.data); } catch(e){} });
