@@ -231,12 +231,58 @@
     render();
   });
   // Versions toggle + controls
+  // Versions panel open/close helpers with focus + aria
+  let _prevFocus = null;
+  function openVersionsPanel(){
+    if (!versionsPanel) return;
+    versionsPanel.classList.add('visible');
+    versionsPanel.setAttribute('aria-hidden','false');
+    if (btnVersions) btnVersions.setAttribute('aria-expanded','true');
+    try { _prevFocus = document.activeElement; } catch(e){ _prevFocus = null; }
+    // prefer saved selection
+    try { const saved = getPref('versionPanel:selected',''); if (selVersion && saved) selVersion.value = saved; } catch(e){}
+    refreshVersionsPanel().then(()=>{
+      // focus first interactive element in panel
+      try {
+        if (selVersion) { selVersion.focus(); return; }
+        const first = versionsPanel.querySelector('.verse-item');
+        if (first) first.focus();
+      } catch(e){}
+    }).catch(()=>{});
+  }
+  function closeVersionsPanel(){
+    if (!versionsPanel) return;
+    versionsPanel.classList.remove('visible');
+    versionsPanel.setAttribute('aria-hidden','true');
+    if (btnVersions) btnVersions.setAttribute('aria-expanded','false');
+    clearVerseHover();
+    try { if (_prevFocus && _prevFocus.focus) _prevFocus.focus(); } catch(e){}
+  }
+  // Toggle button
   if (btnVersions) btnVersions.addEventListener('click', ()=> {
-    const on = !(versionsPanel && versionsPanel.classList.contains('visible'));
-    if (versionsPanel){ versionsPanel.classList.toggle('visible', on); versionsPanel.setAttribute('aria-hidden', on? 'false':'true'); }
-    if (on) refreshVersionsPanel(); else clearVerseHover();
+    const open = !(versionsPanel && versionsPanel.classList.contains('visible'));
+    if (open) openVersionsPanel(); else closeVersionsPanel();
   });
-  if (btnCloseVersions) btnCloseVersions.addEventListener('click', ()=> { if (versionsPanel){ versionsPanel.classList.remove('visible'); versionsPanel.setAttribute('aria-hidden','true'); } clearVerseHover(); });
+  if (btnCloseVersions) btnCloseVersions.addEventListener('click', ()=> { closeVersionsPanel(); });
+  // Escape to close + focus trap within panel
+  document.addEventListener('keydown', (ev) => {
+    try {
+      if (!versionsPanel || !versionsPanel.classList.contains('visible')) return;
+      if (ev.key === 'Escape') { ev.preventDefault(); closeVersionsPanel(); return; }
+      if (ev.key !== 'Tab') return;
+      // focus trap
+      const focusables = versionsPanel.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (!focusables || !focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const cur = document.activeElement;
+      if (ev.shiftKey) {
+        if (cur === first) { ev.preventDefault(); last.focus(); }
+      } else {
+        if (cur === last) { ev.preventDefault(); first.focus(); }
+      }
+    } catch(e){}
+  });
   if (selVersion) selVersion.addEventListener('change', ()=> { refreshVersionsPanel(); try { setPref('versionPanel:selected', selVersion.value||''); } catch(e){} });
   window.addEventListener('resize', () => {
     if (tidyView.classList.contains('visible')) renderTidy();
@@ -668,7 +714,8 @@
     const html = verses.map(v => {
       const num = v && typeof v.verse==='number' ? v.verse : null;
       const tx = (v && v.text) ? String(v.text) : '';
-      return `<div class=\"verse-item\" data-verse=\"${num||''}\"><span class=\"vnum\">${num||''}</span><div class=\"vtext\">${escapeHtml(tx)}</div></div>`;
+      const lab = num ? `절 ${num}` : '절';
+      return `<div class=\"verse-item\" role=\"button\" tabindex=\"0\" aria-label=\"${lab}\" data-verse=\"${num||''}\"><span class=\"vnum\">${num||''}</span><div class=\"vtext\">${escapeHtml(tx)}</div></div>`;
     }).join('');
     versionContent.innerHTML = html;
     versionContent.querySelectorAll('.verse-item').forEach(el => {
@@ -680,6 +727,13 @@
       el.addEventListener('click', () => {
         const num = parseInt(el.getAttribute('data-verse')||'0',10)||0;
         if (num>0) selectFirstClauseForVerse(num);
+      });
+      el.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          const num = parseInt(el.getAttribute('data-verse')||'0',10)||0;
+          if (num>0) selectFirstClauseForVerse(num);
+        }
       });
     });
   }

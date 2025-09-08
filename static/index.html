@@ -84,7 +84,7 @@
       <label>
         <input id="toggleDetails" type="checkbox" /> 상세 보기
       </label>
-      <button id="toggleVersions" title="역본 보기 패널">역본</button>
+      <button id="toggleVersions" title="역본 보기 패널" aria-controls="versionsPanel" aria-expanded="false">역본</button>
     </div>
   </header>
 
@@ -98,15 +98,15 @@
     <div id="detailsResizer" class="resizer horizontal" title="드래그하여 상세 높이 조절"></div>
     <section id="detailsPanel" class="details"></section>
     <aside id="legendPanel" class="legend"></aside>
-    <aside id="versionsPanel" class="versions" aria-label="역본 패널" aria-hidden="true">
+    <aside id="versionsPanel" class="versions" role="complementary" aria-labelledby="vpTitle" aria-hidden="true">
       <div class="vp-header">
-        <strong>역본</strong>
+        <strong id="vpTitle">역본</strong>
         <select id="versionSelect">
           <option value="knt">KNT</option>
           <option value="nkrv">NKRV</option>
           <option value="bhs">BHS</option>
         </select>
-        <button id="closeVersions" class="icon-btn" title="닫기">×</button>
+        <button id="closeVersions" class="icon-btn" title="닫기" aria-label="역본 패널 닫기">×</button>
       </div>
       <div class="vp-subhead">
         <span id="vpRef">-</span>
