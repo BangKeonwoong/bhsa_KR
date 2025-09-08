@@ -769,7 +769,13 @@
     const node = findFirstClauseNodeForVerse(vnum);
     if (!node){ showToast('해당 절의 절/절요소를 찾지 못했습니다', 'warn'); return; }
     try { ensurePathExpandedTo(node.id); } catch(e){}
-    try { state.selectedId = node.id; render(); showDetails(node); } catch(e){}
+    try {
+      state.selectedId = node.id;
+      render();
+      showDetails(node);
+      // center view on the chosen node after DOM paints
+      requestAnimationFrame(() => { try { centerOnNodeId(node.id); } catch(e){} });
+    } catch(e){}
   }
 
   function setActiveVerseInPanel(vnum, doScroll){
@@ -1442,6 +1448,11 @@
   function showDetails(n){
     if (!detailsPanel) return;
     try { if (n && typeof n.id !== 'undefined') { state.selectedId = n.id; } } catch(e) {}
+    // Sync versions panel active verse on selection
+    try {
+      const vnum = parseNodeVerseNum(n && n.verse);
+      if (vnum) setActiveVerseInPanel(vnum, true);
+    } catch(e){}
     try { render(); } catch(e) {}
     // TF 경량 모드: 토큰/글로스가 비어 있으면 지연 로드
     try {
@@ -1575,6 +1586,31 @@
           .catch(()=>{ const wrap = document.getElementById('phraseSegments'); if (wrap) wrap.innerHTML=''; });
       }
     } catch(e) { /* ignore */ }
+  }
+
+  // Center view on a specific node id (tidy tree)
+  function centerOnNodeId(id){
+    try {
+      const svg = state.tidySvg; const z = state.tidyZoom; const zoom = state.tidyZoomBehavior; const base = state.baseTranslate || {x:0,y:0};
+      if (!svg || !zoom) return;
+      // find D3 bound node by id
+      const nodes = tidyContainer.querySelectorAll('g.tree-node');
+      let target = null;
+      for (const el of nodes){ const d = el && el.__data__; if (d && d.data && d.data.id === id){ target = d; break; } }
+      if (!target) return;
+      const isH = (state.orientation === 'horizontal');
+      const wx = isH ? target.y : target.x; // world coords in zoom-layer space
+      const wy = isH ? target.x : target.y;
+      const rect = svg.getBoundingClientRect ? svg.getBoundingClientRect() : { width: tidyContainer.clientWidth, height: tidyContainer.clientHeight };
+      const cx = Math.max(0, rect.width/2);
+      const cy = Math.max(0, rect.height/2);
+      const k = (z && z.k && isFinite(z.k)) ? z.k : 1;
+      const tx = cx - base.x - k*wx;
+      const ty = cy - base.y - k*wy;
+      const t = d3.zoomIdentity.translate(tx, ty).scale(k);
+      d3.select(svg).call(zoom.transform, t);
+      state.tidyZoom = t;
+    } catch(e){}
   }
 
   // ---- Prev/Next clause navigation helpers ----
