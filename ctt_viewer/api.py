@@ -10,7 +10,7 @@ import time
 from typing import Optional
 
 from .http_utils import resp_304, resp_json, APP_START_GMT, httpdate
-from .paths import font_dir, ctt_data_dir, knt_dir
+from .paths import font_dir, ctt_data_dir, knt_dir, nkrv_dir, bhs_dir
 
 from parser.ctt_parser import parse_ctt_cached, enumerate_ctt_ctypes, parse_ctt
 from parser.bhsa import (
@@ -135,6 +135,15 @@ def _latest_ctt_root_mtime(root: Path | None = None) -> str | None:
                     continue
         if latest > 0:
             return httpdate(latest)
+    except Exception:
+        return None
+    return None
+
+
+def _mtime_httpdate(path: Path | None) -> Optional[str]:
+    try:
+        if path and path.exists():
+            return httpdate(path.stat().st_mtime)
     except Exception:
         return None
     return None
@@ -506,6 +515,47 @@ def api_knt_chapter():
     if inm and (etag in inm):
         return resp_304(etag, lm, ma, swr)
     return resp_json(payload, etag, lm, ma, swr)
+
+
+@api_bp.get("/api/versions/chapter")
+def api_versions_chapter():
+    """Unified chapter endpoint for multiple versions (initially KNT).
+
+    Query:
+      - version: knt|nkrv|bhs (case-insensitive)
+      - book: 'genesis' | 'GEN' | full English
+      - chapter: integer
+    """
+    ver = (request.args.get('version', '') or '').strip().lower()
+    book = (request.args.get('book', '') or '').strip()
+    try:
+        chapter = int(request.args.get('chapter', '0') or 0)
+    except Exception:
+        chapter = 0
+    label = resolve_book_label(book)
+    if not ver or not label or not chapter:
+        return jsonify({"error": "invalid parameters"}), 400
+    # For now only KNT is implemented; others will be added in next steps
+    if ver == 'knt':
+        ko_dir = KNT_LABEL_TO_KO.get(label.upper())
+        kpath = (knt_dir() / ko_dir / f"{chapter:02d}.md") if ko_dir else None
+        data = read_knt_chapter(label, chapter)
+        if data is None:
+            return jsonify({"error": "not found"}), 404
+        payload = json.dumps({"version": "knt", "book_label": label, "chapter": chapter, "verses": data}, ensure_ascii=False, separators=(",", ":"))
+        etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+        inm = request.headers.get('If-None-Match', '')
+        lm = _mtime_httpdate(kpath)
+        if _is_nocache():
+            return resp_json(payload, etag, lm, 0, 0)
+        ma, swr = _cache_cfg()
+        if inm and (etag in inm):
+            return resp_304(etag, lm, ma, swr)
+        return resp_json(payload, etag, lm, ma, swr)
+    elif ver in ('nkrv', 'bhs'):
+        return jsonify({"error": "version_not_supported_yet", "message": f"{ver} will be added soon"}), 501
+    else:
+        return jsonify({"error": "unknown_version"}), 400
 
 
 @api_bp.get("/api/books/chapters")
