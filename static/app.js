@@ -50,6 +50,7 @@
   const elLoadStatus = document.getElementById('loadStatus');
   const spinOverlay = document.getElementById('spinnerOverlay');
   const toastEl = document.getElementById('toast');
+  const themeSelect = document.getElementById('themeSelect');
 
   // --- Local storage helpers ---
   const LS_PREFIX = 'cttViewer:';
@@ -364,6 +365,8 @@
       setTimeout(() => { try { openVersionsPanel(); } catch(e){} }, 0);
     }
   } catch(e){}
+  // Init theme select if Theme helper is available
+  try { if (window.Theme && themeSelect) window.Theme.init('themeSelect'); } catch(e){}
 
   async function fetchJsonCached(url){
     const now = Date.now();
@@ -1294,6 +1297,14 @@
     if(node.children&&node.children.length){ const ul=document.createElement('ul'); ul.className='indented'; if(!isCollapsed(node)) node.children.forEach(c=> ul.appendChild(renderItem(c,level+1, neighborsList))); li.appendChild(ul);} return li;
   }
 
+  function ensureListSelectionIntoView(){
+    try {
+      if (!listView || !listView.classList.contains('visible')) return;
+      const sel = listContainer.querySelector('li.node-item.selected');
+      if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    } catch(e){}
+  }
+
   function toggleNode(n){ if(!n||n.id==='root')return; if(state.collapsed.has(n.id)) state.collapsed.delete(n.id); else state.collapsed.add(n.id); render(); }
   function isCollapsed(d){ return d && d.id!=='root' && state.collapsed.has(d.id); }
   function applyCollapsed(root){ walk(root, (n,depth)=>{
@@ -1530,6 +1541,7 @@
       if (vnum) setActiveVerseInPanel(vnum, true);
     } catch(e){}
     try { render(); } catch(e) {}
+    try { ensureListSelectionIntoView(); } catch(e){}
     // TF 경량 모드: 토큰/글로스가 비어 있으면 지연 로드
     try {
       const needTfFetch = (state && state.source === 'tf') && (!n.tokens || !n.tokens.length) && (String(n.id).match(/^[0-9]+$/));

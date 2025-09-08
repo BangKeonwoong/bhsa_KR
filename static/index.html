@@ -84,6 +84,14 @@
       <label>
         <input id="toggleDetails" type="checkbox" /> 상세 보기
       </label>
+      <label>
+        Theme
+        <select id="themeSelect">
+          <option value="auto">Auto</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
       <button id="toggleVersions" title="역본 보기 패널" aria-controls="versionsPanel" aria-expanded="false">역본</button>
     </div>
   </header>
@@ -122,6 +130,7 @@
     </small>
   </footer>
 
+  <script src="./theme.js"></script>
   <script src="./app.js"></script>
   <!-- Spinner Overlay & Toast -->
   <div id="spinnerOverlay" aria-hidden="true">
