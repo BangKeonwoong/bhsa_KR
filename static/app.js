@@ -676,12 +676,13 @@
   }
   function clearVerseHover(){
     if (!tidyContainer) return;
-    tidyContainer.querySelectorAll('g.tree-node.hover-bumped').forEach(el => {
+    tidyContainer.querySelectorAll('g.tree-node.hover-bumped, g.tree-node.hover-hi').forEach(el => {
       try {
         const base = el.getAttribute('data-tf-base');
         if (base) el.setAttribute('transform', base);
         el.removeAttribute('data-tf-base');
         el.classList.remove('hover-bumped');
+        el.classList.remove('hover-hi');
       } catch(e){}
     });
   }
@@ -701,7 +702,7 @@
     if (!tidyContainer) return;
     clearVerseHover();
     const nodes = tidyContainer.querySelectorAll(`g.tree-node[data-verse-num="${vnum}"][data-has-ctype="1"]`);
-    nodes.forEach(el => bumpScale(el, 1.25));
+    nodes.forEach(el => { bumpScale(el, 1.25); try { el.classList.add('hover-hi'); } catch(e){} });
   }
   async function refreshVersionsPanel(){
     try {

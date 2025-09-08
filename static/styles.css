@@ -310,6 +310,16 @@ li.node-item.cat-other{ border-left: 3px solid #9ca3af; padding-left: 8px; }
 .versions .verse-item:hover { background: #f8fafc; }
 .versions .verse-item.active { background: #eef2ff; border-color: #c7d2fe; }
 .versions .verse-item:focus { box-shadow: 0 0 0 3px rgba(99,102,241,0.35); }
+
+/* Hover highlight for tree clause nodes (from versions panel) */
+.tree-node.hover-hi rect.node-rect {
+  stroke: #f59e0b; /* amber-500 */
+  stroke-width: 2px;
+  fill: #fff7ed;   /* amber-50 */
+}
+.tree-node.hover-hi {
+  filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.35));
+}
 .versions .verse-item .vnum { font-weight: 700; color: #1f2937; width: 28px; text-align: right; }
 .versions .verse-item .vtext { flex: 1 1 auto; color: #111827; line-height: 1.5; }
 .versions .empty { color: #6b7280; font-size: 13px; padding: 8px; }
