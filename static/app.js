@@ -718,6 +718,21 @@
     try { state.selectedId = node.id; render(); showDetails(node); } catch(e){}
   }
 
+  function setActiveVerseInPanel(vnum, doScroll){
+    try {
+      if (!versionsPanel || !versionsPanel.classList.contains('visible') || !versionContent) return;
+      versionContent.querySelectorAll('.verse-item.active').forEach(el => el.classList.remove('active'));
+      const el = versionContent.querySelector(`.verse-item[data-verse="${vnum}"]`);
+      if (el){
+        el.classList.add('active');
+        if (doScroll){ try { el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch(e){} }
+      }
+    } catch(e){}
+  }
+  function clearActiveVerseInPanel(){
+    try { if (!versionContent) return; versionContent.querySelectorAll('.verse-item.active').forEach(el => el.classList.remove('active')); } catch(e){}
+  }
+
   // --- Details resizer (drag to set height) ---
   if (detailsResizer){
     let dragging = false;
@@ -869,7 +884,9 @@
         const id = d && d.data ? d.data.id : undefined;
         return !!(state.selectedId && neighbors && neighbors.childIds && neighbors.childIds.has(id));
       })
-      .on('click', (ev, d)=> { if (state.showDetails) { ev.stopPropagation(); showDetails(d.data); } else { toggleNode(d.data); } });
+      .on('click', (ev, d)=> { if (state.showDetails) { ev.stopPropagation(); showDetails(d.data); } else { toggleNode(d.data); } })
+      .on('mouseenter', (ev, d)=>{ try { const v = parseNodeVerseNum(d && d.data && d.data.verse); if (v) setActiveVerseInPanel(v, false); } catch(e){} })
+      .on('mouseleave', ()=>{ try { clearActiveVerseInPanel(); } catch(e){} });
     // Apply legend filtering (fade non-selected)
     const active = (state.activeCats && state.activeCats.size) ? new Set(state.activeCats) : null;
     if (active){
