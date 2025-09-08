@@ -51,7 +51,7 @@ jobs:
           if [ -f data/README.md ]; then cp -v data/README.md "$STAGE_M/data/"; fi
           if [ -f data/wheels/README.md ]; then cp -v data/wheels/README.md "$STAGE_M/data/wheels/"; fi
           (cd "$STAGE_M" && zip -r "../ctt_viewer-macos-${TAG}.zip" .)
-          echo "FILES=ctt_viewer-windows-${TAG}.zip,ctt_viewer-macos-${TAG}.zip" >> $GITHUB_ENV
+          ls -lh ctt_viewer-windows-${TAG}.zip ctt_viewer-macos-${TAG}.zip
       - name: Build Windows portable ZIP (embedded Python + preinstalled deps)
         run: |
           set -euxo pipefail
@@ -93,7 +93,7 @@ PY
           printf "Lib\\site-packages\nimport site\n" >> "$PTH"
           # Create ZIP
           (cd "$STAGE" && zip -r "../ctt_viewer-windows-portable-${TAG}.zip" .)
-          echo "FILES=${FILES},ctt_viewer-windows-portable-${TAG}.zip" >> $GITHUB_ENV
+          ls -lh ctt_viewer-windows-portable-${TAG}.zip
       - name: Prepare release notes from CHANGELOG
         id: notes
         run: |
@@ -114,7 +114,9 @@ PY
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ env.FILES }}
+            ctt_viewer-windows-${{ github.ref_name }}.zip
+            ctt_viewer-macos-${{ github.ref_name }}.zip
+            ctt_viewer-windows-portable-${{ github.ref_name }}.zip
           body_path: ${{ steps.notes.outputs.BODY_PATH }}
           generate_release_notes: false
         env:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ctt-viewer"
-version = "0.2.1"
+version = "0.2.2"
 description = "CTT/BHSA viewer Flask app"
 readme = "README.md"
 requires-python = ">=3.9"

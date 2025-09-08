@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2025-09-07
+### Changed
+- Release workflow: ensure OS-specific and portable ZIP assets are attached reliably (direct file list, no env var aggregation)
+
 ## [0.2.1] - 2025-09-07
 ### Added
 - macOS double-click launcher: `Start Viewer.command` (uses AUTO_INSTALL=1)
