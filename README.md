@@ -94,7 +94,8 @@ AUTO_INSTALL=1 ./run.sh   # Python 미설치 시 Homebrew로 자동 설치 시�
 - 정적 리소스 경로(설치 환경):
   - 기본적으로 패키지 내부 또는 저장소 루트의 `static/`을 자동 탐지합니다.
   - 필요 시 환경변수로 지정: `STATIC_DIR=/path/to/static`
-  - 폰트/데이터도 지정 가능: `FONT_DIR`, `DATA_CTT_DIR`, `KNT_DIR`
+  - 폰트/데이터도 지정 가능: `FONT_DIR`, `DATA_CTT_DIR`
+  - 역본 데이터 경로 지정(선택): `VERSIONS_DIR`(루트), 또는 개별 `KNT_DIR`, `NKRV_DIR`, `BHS_DIR`
 
 ## Docker 실행
 이미지 빌드/실행 예시는 다음과 같습니다. 대용량 데이터(`data/`)는 이미지에 포함하지 않고 런타임에 마운트하는 것을 권장합니다.

@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2025-09-08
+### Added
+- Right-side Versions panel with KNT/NKRV/BHS support.
+- Unified endpoint `/api/versions/chapter?version=knt|nkrv|bhs&book=...&chapter=...` with ETag/Last-Modified.
+- Verse hover highlights corresponding clauses in the tree (x1.25).
+- Verse click selects the first clause in the details panel.
+- Accessibility: keyboardable verse items (Enter/Space), Escape to close, focus trap, aria labelling.
+
+### Changed
+- Consolidated versions data under `versions/{KNT,NKRV,BHS}` with flexible path detection (`VERSIONS_DIR`, `KNT_DIR`, `NKRV_DIR`, `BHS_DIR`).
+
 ## [0.2.2] - 2025-09-07
 ### Changed
 - Release workflow: ensure OS-specific and portable ZIP assets are attached reliably (direct file list, no env var aggregation)
