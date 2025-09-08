@@ -703,6 +703,10 @@
     clearVerseHover();
     const nodes = tidyContainer.querySelectorAll(`g.tree-node[data-verse-num="${vnum}"][data-has-ctype="1"]`);
     nodes.forEach(el => { bumpScale(el, 1.25); try { el.classList.add('hover-hi'); } catch(e){} });
+    try {
+      const lis = listContainer.querySelectorAll(`li.node-item[data-verse-num="${vnum}"][data-has-ctype="1"]`);
+      lis.forEach(el => el.classList.add('hover-hi'));
+    } catch(e){}
   }
   async function refreshVersionsPanel(){
     try {
