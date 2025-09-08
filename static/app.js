@@ -736,19 +736,40 @@
   function applyVerseHover(vnum){
     setVerseHover(vnum);
   }
+  function versionsApiUrl(version, book, chapter){
+    return `/api/versions/chapter?version=${encodeURIComponent(String(version||''))}&book=${encodeURIComponent(String(book||''))}&chapter=${encodeURIComponent(String(chapter||''))}`;
+  }
+  function setVersionsPanelLoading(){ if (versionContent) versionContent.innerHTML = `<div class=\"empty\">불러오는 중…</div>`; }
+  function setVersionsPanelError(){
+    if (!versionContent) return;
+    versionContent.innerHTML = `<div class=\"empty\">역본을 불러오지 못했습니다. <button class=\"btn-retry\">다시 시도</button></div>`;
+    try { const btn = versionContent.querySelector('.btn-retry'); if (btn) btn.addEventListener('click', ()=> refreshVersionsPanel()); } catch(_){}
+  }
+  async function fetchVersionsChapter(version, book, chapter){
+    const r = await fetchJsonCached(versionsApiUrl(version, book, chapter));
+    const j = r && r.json;
+    if (!j || !Array.isArray(j.verses)) return { verses: [], ok: false };
+    return { verses: j.verses, ok: true };
+  }
+  async function loadVersionsPanel(version, book, chapter){
+    try {
+      if (!versionsPanel || !versionsPanel.classList.contains('visible')) return false;
+      if (vpRef) vpRef.textContent = `${bookLabelName(book)} ${chapter}`;
+      setVersionsPanelLoading();
+      const { verses, ok } = await fetchVersionsChapter(version, book, chapter);
+      if (!ok){ setVersionsPanelError(); return false; }
+      renderVersionsContent(verses);
+      return true;
+    } catch(e){ setVersionsPanelError(); return false; }
+  }
   async function refreshVersionsPanel(){
     try {
       if (!versionsPanel || !versionsPanel.classList.contains('visible')) return;
       const ver = ((selVersion && selVersion.value) || 'knt').toLowerCase();
       const book = elBook.value || 'genesis';
       const chapter = parseInt(elChapter.value || '1', 10) || 1;
-      if (vpRef) vpRef.textContent = `${bookLabelName(book)} ${chapter}`;
-      if (versionContent) versionContent.innerHTML = `<div class=\"empty\">불러오는 중…</div>`;
-      const r = await fetchJsonCached(`/api/versions/chapter?version=${encodeURIComponent(ver)}&book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}`);
-      const j = r && r.json;
-      const verses = j && Array.isArray(j.verses) ? j.verses : [];
-      renderVersionsContent(verses);
-    } catch(e){ if (versionContent) { versionContent.innerHTML = `<div class=\"empty\">역본을 불러오지 못했습니다. <button id=\"vpRetry\">다시 시도</button></div>`; try { document.getElementById('vpRetry').addEventListener('click', ()=> refreshVersionsPanel()); } catch(_){} } }
+      await loadVersionsPanel(ver, book, chapter);
+    } catch(e){ setVersionsPanelError(); }
   }
   function renderVersionsContent(verses){
     if (!versionContent) return;
