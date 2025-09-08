@@ -652,21 +652,17 @@
   async function refreshVersionsPanel(){
     try {
       if (!versionsPanel || !versionsPanel.classList.contains('visible')) return;
-      const ver = (selVersion && selVersion.value) || 'knt';
+      const ver = ((selVersion && selVersion.value) || 'knt').toLowerCase();
       const book = elBook.value || 'genesis';
       const chapter = parseInt(elChapter.value || '1', 10) || 1;
       if (vpRef) vpRef.textContent = `${bookLabelName(book)} ${chapter}`;
-      if (ver === 'knt'){
-        const r = await fetchJsonCached(`/api/knt/chapter?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}`);
-        const j = r && r.json;
-        const verses = j && Array.isArray(j.verses) ? j.verses : [];
-        renderVersionsContentKNT(verses);
-      } else {
-        if (versionContent) versionContent.innerHTML = `<div class=\"empty\">지원되지 않는 역본입니다.</div>`;
-      }
+      const r = await fetchJsonCached(`/api/versions/chapter?version=${encodeURIComponent(ver)}&book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}`);
+      const j = r && r.json;
+      const verses = j && Array.isArray(j.verses) ? j.verses : [];
+      renderVersionsContent(verses);
     } catch(e){ if (versionContent) versionContent.innerHTML = `<div class=\"empty\">역본을 불러오지 못했습니다.</div>`; }
   }
-  function renderVersionsContentKNT(verses){
+  function renderVersionsContent(verses){
     if (!versionContent) return;
     if (!verses || !verses.length){ versionContent.innerHTML = `<div class=\"empty\">이 장의 텍스트가 없습니다.</div>`; return; }
     const html = verses.map(v => {
@@ -681,7 +677,45 @@
         if (num>0) applyVerseHover(num);
       });
       el.addEventListener('mouseleave', () => { clearVerseHover(); });
+      el.addEventListener('click', () => {
+        const num = parseInt(el.getAttribute('data-verse')||'0',10)||0;
+        if (num>0) selectFirstClauseForVerse(num);
+      });
     });
+  }
+
+  function ensureDetailsVisible(){
+    try {
+      if (!detailsPanel) return;
+      if (chkDetails){ chkDetails.checked = true; }
+      state.showDetails = true;
+      detailsPanel.classList.add('visible');
+      if (detailsResizer) detailsResizer.classList.add('visible');
+    } catch(e){}
+  }
+  function parseNodeVerseNum(vs){
+    try{ const m = /\b([A-Z]{3})\s+(\d{2}),(\d{2})/.exec(String(vs||'')); return m ? (parseInt(m[3],10)||null) : null; } catch(e){ return null; }
+  }
+  function isClauseNode(n){ return !!(n && n.ctype); }
+  function findFirstClauseNodeForVerse(vnum){
+    let found = null;
+    try {
+      if (!state || !state.data) return null;
+      walk(state.data, (n)=>{
+        if (found) return;
+        if (!n) return;
+        const vn = parseNodeVerseNum(n.verse);
+        if (vn === vnum && isClauseNode(n)) found = n;
+      });
+    } catch(e){}
+    return found;
+  }
+  function selectFirstClauseForVerse(vnum){
+    ensureDetailsVisible();
+    const node = findFirstClauseNodeForVerse(vnum);
+    if (!node){ showToast('해당 절의 절/절요소를 찾지 못했습니다', 'warn'); return; }
+    try { ensurePathExpandedTo(node.id); } catch(e){}
+    try { state.selectedId = node.id; render(); showDetails(node); } catch(e){}
   }
 
   // --- Details resizer (drag to set height) ---
