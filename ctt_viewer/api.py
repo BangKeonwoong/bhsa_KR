@@ -8,6 +8,7 @@ import hashlib
 import re
 import time
 from typing import Optional
+import unicodedata
 
 from .http_utils import resp_304, resp_json, APP_START_GMT, httpdate
 from .paths import font_dir, ctt_data_dir, knt_dir, nkrv_dir, bhs_dir
@@ -209,22 +210,29 @@ def read_knt_chapter(book_label: str, chapter: int) -> Optional[list[dict]]:
     return verses
 
 
+def _nfc(s: str | None) -> str:
+    try:
+        return unicodedata.normalize('NFC', s or '')
+    except Exception:
+        return s or ''
+
+
 def _find_nkrv_book_dir(label: str) -> Optional[Path]:
     """Find NKRV directory like '01-창세기' by KO book name."""
     try:
         root = nkrv_dir()
         if not root.exists():
             return None
-        ko = KNT_LABEL_TO_KO.get(label.upper())
+        ko = _nfc(KNT_LABEL_TO_KO.get(label.upper()))
         if not ko:
             return None
         best = None
         for p in root.iterdir():
             if not p.is_dir():
                 continue
-            name = p.name
+            name = _nfc(p.name)
             base = name.split('-', 1)[-1] if '-' in name else name
-            if base == ko:
+            if _nfc(base) == ko:
                 best = p
                 break
         return best
