@@ -261,9 +261,10 @@
   // Toggle button
   if (btnVersions) btnVersions.addEventListener('click', ()=> {
     const open = !(versionsPanel && versionsPanel.classList.contains('visible'));
-    if (open) openVersionsPanel(); else closeVersionsPanel();
+    if (open) { try { setPref('versionPanel:open','1'); } catch(e){} openVersionsPanel(); }
+    else { try { setPref('versionPanel:open','0'); } catch(e){} closeVersionsPanel(); }
   });
-  if (btnCloseVersions) btnCloseVersions.addEventListener('click', ()=> { closeVersionsPanel(); });
+  if (btnCloseVersions) btnCloseVersions.addEventListener('click', ()=> { try { setPref('versionPanel:open','0'); } catch(e){} closeVersionsPanel(); });
   // Escape to close + focus trap within panel
   document.addEventListener('keydown', (ev) => {
     try {
@@ -355,6 +356,13 @@
     } catch(e){}
   }
   initBooks().then(() => { ensureFirstRunDefaults(); applyInitialStateFromQuery(); applySavedPreferences(); updateUrlFromState(false); }).then(initTfStatus).then(loadData).catch(loadData);
+  // Restore versions panel open state
+  try {
+    const wantOpen = getPref('versionPanel:open','');
+    if (String(wantOpen) === '1') {
+      setTimeout(() => { try { openVersionsPanel(); } catch(e){} }, 0);
+    }
+  } catch(e){}
 
   async function fetchJsonCached(url){
     const now = Date.now();
@@ -702,11 +710,12 @@
       const book = elBook.value || 'genesis';
       const chapter = parseInt(elChapter.value || '1', 10) || 1;
       if (vpRef) vpRef.textContent = `${bookLabelName(book)} ${chapter}`;
+      if (versionContent) versionContent.innerHTML = `<div class=\"empty\">불러오는 중…</div>`;
       const r = await fetchJsonCached(`/api/versions/chapter?version=${encodeURIComponent(ver)}&book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}`);
       const j = r && r.json;
       const verses = j && Array.isArray(j.verses) ? j.verses : [];
       renderVersionsContent(verses);
-    } catch(e){ if (versionContent) versionContent.innerHTML = `<div class=\"empty\">역본을 불러오지 못했습니다.</div>`; }
+    } catch(e){ if (versionContent) { versionContent.innerHTML = `<div class=\"empty\">역본을 불러오지 못했습니다. <button id=\"vpRetry\">다시 시도</button></div>`; try { document.getElementById('vpRetry').addEventListener('click', ()=> refreshVersionsPanel()); } catch(_){} } }
   }
   function renderVersionsContent(verses){
     if (!versionContent) return;
