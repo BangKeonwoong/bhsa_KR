@@ -1,5 +1,5 @@
 from __future__ import annotations
-from flask import Blueprint, jsonify, request, send_from_directory, current_app
+from flask import Blueprint, jsonify, request, send_from_directory, current_app, has_app_context
 from functools import lru_cache
 from pathlib import Path
 import os
@@ -37,12 +37,31 @@ LRU_GLOSS_CACHE = int(os.environ.get('LRU_GLOSS_CACHE', '8'))
 
 
 def _cache_cfg() -> tuple[int, int]:
-    cfg = current_app.config if current_app else {}
+    """Return Cache-Control defaults from app config if available.
+
+    Returns a ``(max_age, stale_while_revalidate)`` tuple.
+
+    Accessing ``current_app`` outside an application context raises a
+    ``RuntimeError``.  The previous implementation attempted to guard this by
+    checking the truthiness of ``current_app``, but evaluating the proxy itself
+    already triggers the error.  Using ``has_app_context`` avoids that problem
+    and gracefully falls back to the default values when no app context is
+    active.
+    """
+    cfg = current_app.config if has_app_context() else {}
     return int(cfg.get('CACHE_MAX_AGE', 300)), int(cfg.get('CACHE_SWR', 60))
 
 
 def _cache_cfg_tree(is_lite: bool) -> tuple[int, int]:
-    cfg = current_app.config if current_app else {}
+    """Return cache configuration for tree endpoints.
+
+    The result is a ``(max_age, stale_while_revalidate)`` tuple.
+
+    Like :func:`_cache_cfg`, this must tolerate calls outside an application
+    context (e.g. when invoked during module import or testing).  ``has_app_context``
+    ensures we only touch ``current_app`` when it is safe to do so.
+    """
+    cfg = current_app.config if has_app_context() else {}
     if is_lite:
         return int(cfg.get('TREE_LITE_MAX_AGE', 600)), int(cfg.get('TREE_LITE_SWR', 120))
     return int(cfg.get('TREE_FULL_MAX_AGE', 120)), int(cfg.get('TREE_FULL_SWR', 60))
