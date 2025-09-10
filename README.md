@@ -5,8 +5,8 @@
 ## Windows
 
 ### 준비물
-- Git
-- 인터넷만 연결되어 있으면 `start_viewer.bat`이 필요한 Python과 패키지를 자동으로 설치합니다.
+- Git (<https://git-scm.com/downloads>)
+- Python 3.9 이상 (<https://www.python.org/downloads/>)
 
 ### 설치 및 실행
 ```powershell
@@ -19,8 +19,8 @@ start_viewer.bat        # 또는 PowerShell: .\setup_windows.ps1 -AutoInstall
 ## macOS / Linux
 
 ### 준비물
-- Git
-- Python 3.9 이상 (macOS는 `brew install python`)
+- Git (<https://git-scm.com/downloads>)
+- Python 3.9 이상 (<https://www.python.org/downloads/> , macOS는 `brew install python` 도 가능)
 
 ### 설치 및 실행
 ```bash
