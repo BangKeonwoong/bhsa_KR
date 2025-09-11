@@ -11,6 +11,7 @@
     selectedId: null,
     anchorMode: 'center',
     fitDoneFor: new Set(),
+    lastHoverVerse: null,
   };
   const elBook = document.getElementById('book');
   const elChapter = document.getElementById('chapter');
@@ -35,6 +36,13 @@
   const detailsPanel = document.getElementById('detailsPanel');
   const detailsResizer = document.getElementById('detailsResizer');
   const legendPanel = document.getElementById('legendPanel');
+  // Versions side panel elements
+  const btnVersions = document.getElementById('toggleVersions');
+  const versionsPanel = document.getElementById('versionsPanel');
+  const selVersion = document.getElementById('versionSelect');
+  const versionContent = document.getElementById('versionContent');
+  const btnCloseVersions = document.getElementById('closeVersions');
+  const vpRef = document.getElementById('vpRef');
   const depthRange = document.getElementById('depthRange');
   const depthValue = document.getElementById('depthValue');
   const spacingRange = document.getElementById('spacingRange');
@@ -42,6 +50,7 @@
   const elLoadStatus = document.getElementById('loadStatus');
   const spinOverlay = document.getElementById('spinnerOverlay');
   const toastEl = document.getElementById('toast');
+  const themeSelect = document.getElementById('themeSelect');
 
   // --- Local storage helpers ---
   const LS_PREFIX = 'cttViewer:';
@@ -223,6 +232,61 @@
     } catch(e) { /* ignore */ }
     render();
   });
+  // Versions toggle + controls
+  // Versions panel open/close helpers with focus + aria
+  let _prevFocus = null;
+  function openVersionsPanel(){
+    if (!versionsPanel) return;
+    versionsPanel.classList.add('visible');
+    versionsPanel.setAttribute('aria-hidden','false');
+    if (btnVersions) btnVersions.setAttribute('aria-expanded','true');
+    try { _prevFocus = document.activeElement; } catch(e){ _prevFocus = null; }
+    // prefer saved selection
+    try { const saved = getPref('versionPanel:selected',''); if (selVersion && saved) selVersion.value = saved; } catch(e){}
+    refreshVersionsPanel().then(()=>{
+      // focus first interactive element in panel
+      try {
+        if (selVersion) { selVersion.focus(); return; }
+        const first = versionsPanel.querySelector('.verse-item');
+        if (first) first.focus();
+      } catch(e){}
+    }).catch(()=>{});
+  }
+  function closeVersionsPanel(){
+    if (!versionsPanel) return;
+    versionsPanel.classList.remove('visible');
+    versionsPanel.setAttribute('aria-hidden','true');
+    if (btnVersions) btnVersions.setAttribute('aria-expanded','false');
+    clearVerseHover();
+    try { if (_prevFocus && _prevFocus.focus) _prevFocus.focus(); } catch(e){}
+  }
+  // Toggle button
+  if (btnVersions) btnVersions.addEventListener('click', ()=> {
+    const open = !(versionsPanel && versionsPanel.classList.contains('visible'));
+    if (open) { try { setPref('versionPanel:open','1'); } catch(e){} openVersionsPanel(); }
+    else { try { setPref('versionPanel:open','0'); } catch(e){} closeVersionsPanel(); }
+  });
+  if (btnCloseVersions) btnCloseVersions.addEventListener('click', ()=> { try { setPref('versionPanel:open','0'); } catch(e){} closeVersionsPanel(); });
+  // Escape to close + focus trap within panel
+  document.addEventListener('keydown', (ev) => {
+    try {
+      if (!versionsPanel || !versionsPanel.classList.contains('visible')) return;
+      if (ev.key === 'Escape') { ev.preventDefault(); closeVersionsPanel(); return; }
+      if (ev.key !== 'Tab') return;
+      // focus trap
+      const focusables = versionsPanel.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (!focusables || !focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const cur = document.activeElement;
+      if (ev.shiftKey) {
+        if (cur === first) { ev.preventDefault(); last.focus(); }
+      } else {
+        if (cur === last) { ev.preventDefault(); first.focus(); }
+      }
+    } catch(e){}
+  });
+  if (selVersion) selVersion.addEventListener('change', ()=> { refreshVersionsPanel(); try { setPref('versionPanel:selected', selVersion.value||''); } catch(e){} });
   window.addEventListener('resize', () => {
     if (tidyView.classList.contains('visible')) renderTidy();
   });
@@ -294,6 +358,15 @@
     } catch(e){}
   }
   initBooks().then(() => { ensureFirstRunDefaults(); applyInitialStateFromQuery(); applySavedPreferences(); updateUrlFromState(false); }).then(initTfStatus).then(loadData).catch(loadData);
+  // Restore versions panel open state
+  try {
+    const wantOpen = getPref('versionPanel:open','');
+    if (String(wantOpen) === '1') {
+      setTimeout(() => { try { openVersionsPanel(); } catch(e){} }, 0);
+    }
+  } catch(e){}
+  // Init theme select if Theme helper is available
+  try { if (window.Theme && themeSelect) window.Theme.init('themeSelect'); } catch(e){}
 
   async function fetchJsonCached(url){
     const now = Date.now();
@@ -573,6 +646,8 @@
     hideSpinner();
     // Ensure resizer visibility matches panel state on first load
     if (detailsResizer){ detailsResizer.classList.toggle('visible', !!state.showDetails); }
+    // If versions panel is open, sync its content with current book/chapter
+    try { await refreshVersionsPanel(); } catch(e){}
   }
 
   function hasAnyGloss(root){
@@ -597,6 +672,210 @@
       render();
     }catch(e){ render(); showToast('상세 불러오기 실패', 'err'); }
     finally { hideSpinner(); }
+  }
+
+  // ---- Versions panel support ----
+  function bookLabelName(val){
+    try { return (elBook.options[elBook.selectedIndex] || {}).textContent || val || ''; } catch(e){ return val || ''; }
+  }
+  // --- Hover helpers (unified) ---
+  /**
+   * Return NodeList of tidy tree clause nodes for a given verse number.
+   * Nodes carry data-verse-num and data-has-ctype attributes.
+   */
+  function _treeClauseNodesByVerse(vnum){
+    try { return tidyContainer.querySelectorAll(`g.tree-node[data-verse-num="${vnum}"][data-has-ctype="1"]`); } catch(e){ return []; }
+  }
+  /** Return NodeList of list-view items for a given verse number. */
+  function _listClauseItemsByVerse(vnum){
+    try { return listContainer.querySelectorAll(`li.node-item[data-verse-num="${vnum}"][data-has-ctype="1"]`); } catch(e){ return []; }
+  }
+  function _unhoverNodes(nodes){
+    nodes.forEach(el => {
+      try {
+        const base = el.getAttribute('data-tf-base');
+        if (base) el.setAttribute('transform', base);
+        el.removeAttribute('data-tf-base');
+        el.classList.remove('hover-bumped');
+        el.classList.remove('hover-hi');
+      } catch(e){}
+    });
+  }
+  /** Remove hover highlight/scale for the specified verse across views. */
+  function unhoverVerse(vnum){
+    if (!vnum) return;
+    try { _unhoverNodes(_treeClauseNodesByVerse(vnum)); } catch(e){}
+    try { _listClauseItemsByVerse(vnum).forEach(el => el.classList.remove('hover-hi')); } catch(e){}
+  }
+  /** Clear any active verse hover (cached) and residual classes. */
+  function clearVerseHover(){
+    if (!tidyContainer) return;
+    if (state.lastHoverVerse){ unhoverVerse(state.lastHoverVerse); state.lastHoverVerse = null; }
+    // Best-effort cleanup in case of re-renders
+    try {
+      tidyContainer.querySelectorAll('g.tree-node.hover-bumped, g.tree-node.hover-hi').forEach(el => {
+        const base = el.getAttribute('data-tf-base'); if (base) el.setAttribute('transform', base);
+        el.removeAttribute('data-tf-base'); el.classList.remove('hover-bumped'); el.classList.remove('hover-hi');
+      });
+      listContainer.querySelectorAll('li.node-item.hover-hi').forEach(el => el.classList.remove('hover-hi'));
+    } catch(e){}
+  }
+  function bumpScale(el, mul){
+    try{
+      let base = el.getAttribute('data-tf-base');
+      if (!base){ base = el.getAttribute('transform') || ''; el.setAttribute('data-tf-base', base); }
+      const m = base.match(/translate\(([^)]*)\)\s*(?:scale\(([^)]*)\))?/);
+      const pos = m ? m[1] : '0,0';
+      const s0 = m && m[2] ? parseFloat(m[2]) : 1;
+      const s1 = isFinite(s0) ? s0 * mul : mul;
+      el.setAttribute('transform', `translate(${pos}) scale(${s1})`);
+      el.classList.add('hover-bumped');
+    } catch(e){}
+  }
+  /** Apply hover highlight for a verse (tree scale + highlight, list highlight). */
+  function setVerseHover(vnum){
+    if (!tidyContainer) return;
+    try { vnum = parseInt(vnum, 10) || 0; } catch(e){ vnum = 0; }
+    if (!vnum){ clearVerseHover(); return; }
+    if (state.lastHoverVerse === vnum) return;
+    if (state.lastHoverVerse){ unhoverVerse(state.lastHoverVerse); }
+    const nodes = _treeClauseNodesByVerse(vnum);
+    nodes.forEach(el => { bumpScale(el, 1.25); try { el.classList.add('hover-hi'); } catch(e){} });
+    try { _listClauseItemsByVerse(vnum).forEach(el => el.classList.add('hover-hi')); } catch(e){}
+    state.lastHoverVerse = vnum;
+  }
+  function applyVerseHover(vnum){
+    setVerseHover(vnum);
+  }
+  /** Build unified versions API URL for fetch. */
+  function versionsApiUrl(version, book, chapter){
+    return `/api/versions/chapter?version=${encodeURIComponent(String(version||''))}&book=${encodeURIComponent(String(book||''))}&chapter=${encodeURIComponent(String(chapter||''))}`;
+  }
+  /** Render loading placeholder into versions panel. */
+  function setVersionsPanelLoading(){ if (versionContent) versionContent.innerHTML = `<div class=\"empty\">불러오는 중…</div>`; }
+  /** Render error + retry into versions panel. */
+  function setVersionsPanelError(){
+    if (!versionContent) return;
+    versionContent.innerHTML = `<div class=\"empty\">역본을 불러오지 못했습니다. <button class=\"btn-retry\">다시 시도</button></div>`;
+    try { const btn = versionContent.querySelector('.btn-retry'); if (btn) btn.addEventListener('click', ()=> refreshVersionsPanel()); } catch(_){}
+  }
+  /** Fetch verses for (version,book,chapter). Returns {verses:Array, ok:boolean}. */
+  async function fetchVersionsChapter(version, book, chapter){
+    const r = await fetchJsonCached(versionsApiUrl(version, book, chapter));
+    const j = r && r.json;
+    if (!j || !Array.isArray(j.verses)) return { verses: [], ok: false };
+    return { verses: j.verses, ok: true };
+  }
+  /** Load panel content by calling fetch helper and rendering or erroring. */
+  async function loadVersionsPanel(version, book, chapter){
+    try {
+      if (!versionsPanel || !versionsPanel.classList.contains('visible')) return false;
+      if (vpRef) vpRef.textContent = `${bookLabelName(book)} ${chapter}`;
+      setVersionsPanelLoading();
+      const { verses, ok } = await fetchVersionsChapter(version, book, chapter);
+      if (!ok){ setVersionsPanelError(); return false; }
+      renderVersionsContent(verses);
+      return true;
+    } catch(e){ setVersionsPanelError(); return false; }
+  }
+  async function refreshVersionsPanel(){
+    try {
+      if (!versionsPanel || !versionsPanel.classList.contains('visible')) return;
+      const ver = ((selVersion && selVersion.value) || 'knt').toLowerCase();
+      const book = elBook.value || 'genesis';
+      const chapter = parseInt(elChapter.value || '1', 10) || 1;
+      await loadVersionsPanel(ver, book, chapter);
+    } catch(e){ setVersionsPanelError(); }
+  }
+  function renderVersionsContent(verses){
+    if (!versionContent) return;
+    if (!verses || !verses.length){ versionContent.innerHTML = `<div class=\"empty\">이 장의 텍스트가 없습니다.</div>`; return; }
+    const html = verses.map(v => {
+      const num = v && typeof v.verse==='number' ? v.verse : null;
+      const tx = (v && v.text) ? String(v.text) : '';
+      const lab = num ? `절 ${num}` : '절';
+      return `<div class=\"verse-item\" role=\"button\" tabindex=\"0\" aria-label=\"${lab}\" data-verse=\"${num||''}\"><span class=\"vnum\">${num||''}</span><div class=\"vtext\">${escapeHtml(tx)}</div></div>`;
+    }).join('');
+    versionContent.innerHTML = html;
+    versionContent.querySelectorAll('.verse-item').forEach(el => {
+      el.addEventListener('mouseenter', () => {
+        const num = parseInt(el.getAttribute('data-verse')||'0',10)||0;
+        if (num>0) applyVerseHover(num);
+      });
+      el.addEventListener('mouseleave', () => { clearVerseHover(); });
+      el.addEventListener('click', () => {
+        const num = parseInt(el.getAttribute('data-verse')||'0',10)||0;
+        if (num>0) selectFirstClauseForVerse(num);
+      });
+      el.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          const num = parseInt(el.getAttribute('data-verse')||'0',10)||0;
+          if (num>0) selectFirstClauseForVerse(num);
+        }
+      });
+    });
+  }
+
+  function ensureDetailsVisible(){
+    try {
+      if (!detailsPanel) return;
+      if (chkDetails){ chkDetails.checked = true; }
+      state.showDetails = true;
+      detailsPanel.classList.add('visible');
+      if (detailsResizer) detailsResizer.classList.add('visible');
+    } catch(e){}
+  }
+  // --- Verse utils ---
+  /** Parse verse number (int) from a BHSA-like ref string e.g. "GEN 01,03". */
+  function verseNumFromRef(vs){
+    try{ const m = /\b([A-Z]{3})\s+(\d{2}),(\d{2})/.exec(String(vs||'')); return m ? (parseInt(m[3],10)||null) : null; } catch(e){ return null; }
+  }
+  /** Convenience wrapper: parse verse number from a node object. */
+  function verseNumFromNode(n){ return verseNumFromRef(n && n.verse); }
+  // Backward-compat name (to be phased out)
+  function parseNodeVerseNum(vs){ return verseNumFromRef(vs); }
+  function isClauseNode(n){ return !!(n && n.ctype); }
+  function findFirstClauseNodeForVerse(vnum){
+    let found = null;
+    try {
+      if (!state || !state.data) return null;
+      walk(state.data, (n)=>{
+        if (found) return;
+        if (!n) return;
+        const vn = verseNumFromNode(n);
+        if (vn === vnum && isClauseNode(n)) found = n;
+      });
+    } catch(e){}
+    return found;
+  }
+  function selectFirstClauseForVerse(vnum){
+    ensureDetailsVisible();
+    const node = findFirstClauseNodeForVerse(vnum);
+    if (!node){ showToast('해당 절의 절/절요소를 찾지 못했습니다', 'warn'); return; }
+    try { ensurePathExpandedTo(node.id); } catch(e){}
+    try {
+      state.selectedId = node.id;
+      render();
+      showDetails(node);
+      // center view on the chosen node after DOM paints
+      requestAnimationFrame(() => { try { centerOnNodeId(node.id); } catch(e){} });
+    } catch(e){}
+  }
+
+  function setActiveVerseInPanel(vnum, doScroll){
+    try {
+      if (!versionsPanel || !versionsPanel.classList.contains('visible') || !versionContent) return;
+      versionContent.querySelectorAll('.verse-item.active').forEach(el => el.classList.remove('active'));
+      const el = versionContent.querySelector(`.verse-item[data-verse="${vnum}"]`);
+      if (el){
+        el.classList.add('active');
+        if (doScroll){ try { el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch(e){} }
+      }
+    } catch(e){}
+  }
+  function clearActiveVerseInPanel(){
+    try { if (!versionContent) return; versionContent.querySelectorAll('.verse-item.active').forEach(el => el.classList.remove('active')); } catch(e){}
   }
 
   // --- Details resizer (drag to set height) ---
@@ -652,31 +931,127 @@
 
   function render(){ if (tidyView.classList.contains('visible')) renderTidy(); else renderList(); }
 
+  // ---- Tidy helpers ----
+  /**
+   * Given a d3.hierarchy root and selected id, collect neighbor metadata:
+   * - parentId: id of direct parent (for 1.3x scale)
+   * - childIds: set of visible children ids (for 2x scale)
+   */
+  function collectNeighbors(root, selectedId){
+    let parentId = null; const childIds = new Set();
+    if (!selectedId) return { parentId, childIds };
+    let sel = null; try { root.each(n => { if (n && n.data && n.data.id === selectedId) sel = n; }); } catch(e){}
+    if (!sel) return { parentId, childIds };
+    try { if (sel.parent && sel.parent.data) parentId = sel.parent.data.id; } catch(e){}
+    try { (sel.children || []).forEach(ch => { if (ch && ch.data) childIds.add(ch.data.id); }); } catch(e){}
+    return { parentId, childIds };
+  }
+
+  /** Apply legend-based fading on nodes and links based on activeCats. */
+  function legendFilter(node, linkLayer){
+    const active = (state.activeCats && state.activeCats.size) ? new Set(state.activeCats) : null;
+    if (!active) return;
+    const include = new Set();
+    try { node.each(function(d){ const cat = clauseClass(d.data); if (active.has(cat)) include.add(d.data.id); }); } catch(e){}
+    try { node.classed('faded', function(d){ return !include.has(d.data.id); }); } catch(e){}
+    try { linkLayer.classed('faded', function(d){ return !(include.has(d.source.data.id) && include.has(d.target.data.id)); }); } catch(e){}
+  }
+
+  /**
+   * Add text labels to each node and, on next frame, measure and insert
+   * rounded rect backgrounds sized to the text. Also raises the selected
+   * node above siblings and decorates labels.
+   */
+  function addTextAndRects(node, labelTextForNodeCb){
+    const textSel = node.append('text')
+      .attr('dy','0.32em')
+      .attr('x', 0)
+      .attr('text-anchor', 'middle')
+      .text(d=> { try { return labelTextForNodeCb ? labelTextForNodeCb(d) : ''; } catch(e){ return ''; } });
+    const padX = 8, padY = 4;
+    requestAnimationFrame(() => {
+      try {
+        textSel.each(function(d){
+          try {
+            const bbox = this.getBBox();
+            const w = Math.max(10, bbox.width + padX*2);
+            const h = Math.max(16, bbox.height + padY*2);
+            const rx = -w/2; const ry = -h/2;
+            d3.select(this.parentNode).insert('rect','text')
+              .attr('class','node-rect ' + clauseClass(d && d.data))
+              .attr('x', rx).attr('y', ry).attr('width', w).attr('height', h);
+            d3.select(this).attr('x', 0).attr('dy', '0.32em');
+          } catch (e) {
+            const name = (d && d.data && d.data.name) ? d.data.name : '';
+            const w = Math.max(40, name.length * 6) + padX*2; const h = 18 + padY*2; const rx = -w/2; const ry = -h/2;
+            d3.select(this.parentNode).insert('rect','text')
+              .attr('class','node-rect ' + clauseClass(d && d.data))
+              .attr('x', rx).attr('y', ry).attr('width', w).attr('height', h);
+            d3.select(this).attr('x', 0).attr('dy', '0.32em');
+          }
+        });
+        try { node.selectAll('rect.node-rect').classed('hl', function(d){ const cat = clauseClass(d && d.data); return !!(state.highlightCats && state.highlightCats.has(cat)); }); } catch(e){}
+        // Raise selected node to top
+        try { if (state.selectedId){ node.each(function(d){ try { if (d && d.data && d.data.id === state.selectedId) { const p = this.parentNode; if (p) p.appendChild(this); } } catch(e){} }); } } catch(e){}
+        // Decorate labels
+        try { textSel.each(function(d){ try { decorateTidyNodeLabel(this, d && d.data); } catch(e){} }); } catch(e){}
+      } catch(e){}
+    });
+    return textSel;
+  }
+
+  /** Add edge (relation) labels and schedule collision resolution. */
+  function addEdgeLabelsAndResolve(g, links){
+    const linksWithRela = links.filter(d=>{ const r=d&&d.target&&d.target.data&&d.target.data.rela; return (r&&r!=='NA'); });
+    const elabelLayer = g.append('g').attr('class','edge-labels');
+    const elGroups = elabelLayer.selectAll('g').data(linksWithRela).join('g').attr('class','edge-label-group');
+    elGroups.each(function(d){ const r = d.target.data.rela; d3.select(this).append('text').attr('class', `edge-label ${classForRela(r)}`).attr('text-anchor','middle').text(r); });
+    let edgeLabelIdle;
+    function scheduleEdgeLabelResolve(){
+      if (edgeLabelIdle) { try { cancelIdleCallback(edgeLabelIdle); } catch(e) { clearTimeout(edgeLabelIdle); } }
+      const run = ()=> { try { resolveEdgeLabelCollisions(elGroups.nodes(), g.node(), state.orientation); } catch(e){} };
+      try { edgeLabelIdle = requestIdleCallback(run, { timeout: 120 }); } catch(e) { edgeLabelIdle = setTimeout(run, 60); }
+    }
+    scheduleEdgeLabelResolve();
+    return scheduleEdgeLabelResolve;
+  }
+
+  /**
+   * Bind zoom behavior and restore previous view anchor/zoom if present.
+   * Returns { zoom, appliedPrev }.
+   */
+  function setupZoomAndView(svg, g, baseX, baseY){
+    const zoom = d3.zoom().on('zoom', (e)=> { g.attr('transform', e.transform); state.tidyZoom = e.transform; });
+    svg.call(zoom);
+    try { state.tidyZoomBehavior = zoom; state.tidySvg = svg.node(); } catch(e){}
+    let appliedPrev = false;
+    try {
+      if (state.viewAnchor && typeof state.viewAnchor.x === 'number' && typeof state.viewAnchor.y === 'number'){
+        const k = (state.viewAnchor.k && isFinite(state.viewAnchor.k)) ? state.viewAnchor.k : 1;
+        const rect2 = (svg && svg.node && svg.node().getBoundingClientRect) ? svg.node().getBoundingClientRect() : tidyContainer.getBoundingClientRect();
+        const cx2 = Math.max(0, rect2.width/2); const cy2 = Math.max(0, rect2.height/2);
+        const tx = cx2 - baseX - k*state.viewAnchor.x; const ty = cy2 - baseY - k*state.viewAnchor.y;
+        const t = d3.zoomIdentity.translate(tx, ty).scale(k);
+        svg.call(zoom.transform, t);
+        state.tidyZoom = t; appliedPrev = true;
+      }
+    } catch(e) { appliedPrev = false; }
+    state.baseTranslate = { x: baseX, y: baseY };
+    return { zoom, appliedPrev };
+  }
+
+  /** Render the tidy tree view (hierarchical D3 tree). */
   function renderTidy(){
     // Capture current view anchor before rerender so we can preserve viewpoint
     try { state.viewAnchor = captureViewAnchor(); } catch(e) { /* ignore */ }
     tidyContainer.innerHTML=''; if (!state.data) return;
-    // Active-only fading uses highlight set
-    state.activeCats = (state.activeOnly && state.highlightCats && state.highlightCats.size)
-      ? new Set(state.highlightCats)
-      : null;
+    state.activeCats = (state.activeOnly && state.highlightCats && state.highlightCats.size) ? new Set(state.highlightCats) : null;
     const data = deepClone(state.data); applyCollapsed(data);
     const root = d3.hierarchy(data);
-    // Collect neighbor info: parent id (1.3x) and visible child ids (2x)
-    const neighbors = (function collectNeighbors(selId){
-      let parentId = null; const childIds = new Set();
-      if (!selId) return { parentId, childIds };
-      let sel = null; root.each(n => { if (n && n.data && n.data.id === selId) sel = n; });
-      if (!sel) return { parentId, childIds };
-      if (sel.parent && sel.parent.data) parentId = sel.parent.data.id;
-      (sel.children || []).forEach(ch => { if (ch && ch.data) childIds.add(ch.data.id); });
-      return { parentId, childIds };
-    })(state.selectedId);
+    const neighbors = collectNeighbors(root, state.selectedId);
     // Spacing controlled by slider
     const baseSpacing = state.spacing || 280;
-    // Adjust both vertical and horizontal spacing together
     const dy = baseSpacing; // depth spacing (left-right when horizontal, top-bottom when vertical)
-    // Reduce baseline sibling spacing to tighten vertical gaps; scale with slider
     const dx = Math.max(12, Math.round(baseSpacing / 14)); // sibling spacing base (px)
     function labelTextForNode(d){
       if (!d || !d.data) return '';
@@ -730,6 +1105,8 @@
         : linkGen({source:{x:d.source.x,y:d.source.y},target:{x:d.target.x,y:d.target.y}}));
     // Nodes layer
     const node=g.append('g').selectAll('g').data(root.descendants()).join('g').attr('class','tree-node')
+      .attr('data-verse-num', d => { try { const m = String(d && d.data && d.data.verse || '').match(/^[A-Z]{3}\s+\d{2},(\d{2})/); return m ? String(parseInt(m[1],10)||'') : ''; } catch(e){ return ''; } })
+      .attr('data-has-ctype', d => (d && d.data && d.data.ctype) ? '1' : '')
       .attr('transform', d=> {
         const pos = (state.orientation==='horizontal'? `translate(${d.y},${d.x})`: `translate(${d.x},${d.y})`);
         const id = d && d.data ? d.data.id : undefined;
@@ -748,120 +1125,19 @@
         const id = d && d.data ? d.data.id : undefined;
         return !!(state.selectedId && neighbors && neighbors.childIds && neighbors.childIds.has(id));
       })
-      .on('click', (ev, d)=> { if (state.showDetails) { ev.stopPropagation(); showDetails(d.data); } else { toggleNode(d.data); } });
+      .on('click', (ev, d)=> { if (state.showDetails) { ev.stopPropagation(); showDetails(d.data); } else { toggleNode(d.data); } })
+      .on('mouseenter', (ev, d)=>{ try { const v = verseNumFromNode(d && d.data); if (v) setActiveVerseInPanel(v, false); } catch(e){} })
+      .on('mouseleave', ()=>{ try { clearActiveVerseInPanel(); } catch(e){} });
     // Apply legend filtering (fade non-selected)
-    const active = (state.activeCats && state.activeCats.size) ? new Set(state.activeCats) : null;
-    if (active){
-      const include = new Set();
-      node.each(function(d){ const cat = clauseClass(d.data); if (active.has(cat)) include.add(d.data.id); });
-      node.classed('faded', function(d){ return !include.has(d.data.id); });
-      linkLayer.classed('faded', function(d){ return !(include.has(d.source.data.id) && include.has(d.target.data.id)); });
-    }
-    // Draw text first (pass 1)
-    const textSel = node.append('text')
-      .attr('dy','0.32em')
-      .attr('x', 0)
-      .attr('text-anchor', 'middle')
-      .text(d=> labelTextForNode(d));
-    // Pass 2: measure and insert rects on next frame (safe guard + fallback)
-    const padX = 8, padY = 4;
-    requestAnimationFrame(() => {
-      try {
-        textSel.each(function(d){
-          try {
-            const bbox = this.getBBox();
-            const w = Math.max(10, bbox.width + padX*2);
-            const h = Math.max(16, bbox.height + padY*2);
-            const rx = -w/2;
-            const ry = -h/2;
-            const rect = d3.select(this.parentNode)
-              .insert('rect','text')
-              .attr('class','node-rect ' + clauseClass(d && d.data))
-              .attr('x', rx)
-              .attr('y', ry)
-              .attr('width', w)
-              .attr('height', h);
-            // Center text horizontally (anchor=middle)
-            d3.select(this).attr('x', 0).attr('dy', '0.32em');
-          } catch (e) {
-            const name = (d && d.data && d.data.name) ? d.data.name : '';
-            const w = Math.max(40, name.length * 6) + padX*2;
-            const h = 18 + padY*2;
-            const rx = -w/2;
-            const ry = -h/2;
-            d3.select(this.parentNode)
-              .insert('rect','text')
-              .attr('class','node-rect ' + clauseClass(d && d.data))
-              .attr('x', rx)
-              .attr('y', ry)
-              .attr('width', w)
-              .attr('height', h);
-            d3.select(this).attr('x', 0).attr('dy', '0.32em');
-          }
-        });
-        // Apply highlight class to rects for selected categories
-        try {
-          node.selectAll('rect.node-rect').classed('hl', function(d){
-            const cat = clauseClass(d && d.data);
-            return !!(state.highlightCats && state.highlightCats.has(cat));
-          });
-        } catch(e) { /* ignore */ }
-      } catch (e) {
-        // swallow
-      }
-      // After initial rects, decorate labels with subject/predicate coloring
-      try {
-        textSel.each(function(d){ try { decorateTidyNodeLabel(this, d && d.data); } catch(e){} });
-      } catch(e){}
-    });
+    legendFilter(node, linkLayer);
+    const textSel = addTextAndRects(node, labelTextForNode);
 
     // Edge labels (rela) after nodes for visibility and collision-aware placement
-    const linksWithRela = links.filter(d=>{
-      const r=d&&d.target&&d.target.data&&d.target.data.rela; return (r&&r!=='NA');
-    });
-    const elabelLayer = g.append('g').attr('class','edge-labels');
-    const elGroups = elabelLayer.selectAll('g').data(linksWithRela).join('g').attr('class','edge-label-group');
-    elGroups.each(function(d){
-      const r = d.target.data.rela;
-      const grp = d3.select(this);
-      grp.append('text').attr('class', `edge-label ${classForRela(r)}`)
-        .attr('text-anchor','middle')
-        .text(r);
-    });
-
-    // Schedule collision resolution lazily to speed first paint
-    let edgeLabelIdle;
-    function scheduleEdgeLabelResolve(){
-      if (edgeLabelIdle) { try { cancelIdleCallback(edgeLabelIdle); } catch(e) { clearTimeout(edgeLabelIdle); } }
-      const run = ()=> { try { resolveEdgeLabelCollisions(elGroups.nodes(), g.node(), state.orientation); } catch(e){} };
-      try { edgeLabelIdle = requestIdleCallback(run, { timeout: 120 }); } catch(e) { edgeLabelIdle = setTimeout(run, 60); }
-    }
-    scheduleEdgeLabelResolve();
+    const scheduleEdgeLabelResolve = addEdgeLabelsAndResolve(g, links);
     // Zoom behavior with view preservation
-    const zoom = d3.zoom().on('zoom', (e)=> {
-      g.attr('transform', e.transform);
-      state.tidyZoom = e.transform;
-    }).on('end', ()=> { scheduleEdgeLabelResolve(); });
-    svg.call(zoom);
-    // expose zoom behavior + svg node for programmatic transforms
-    try { state.tidyZoomBehavior = zoom; state.tidySvg = svg.node(); } catch(e) { /* ignore */ }
-    // Re-apply previous view anchored at screen center with same zoom
-    let appliedPrev = false;
-    try {
-      if (state.viewAnchor && typeof state.viewAnchor.x === 'number' && typeof state.viewAnchor.y === 'number'){
-        const k = (state.viewAnchor.k && isFinite(state.viewAnchor.k)) ? state.viewAnchor.k : 1;
-        const rect2 = (svg && svg.node && svg.node().getBoundingClientRect) ? svg.node().getBoundingClientRect() : tidyContainer.getBoundingClientRect();
-        const cx2 = Math.max(0, rect2.width/2);
-        const cy2 = Math.max(0, rect2.height/2);
-        const tx = cx2 - baseX - k*state.viewAnchor.x;
-        const ty = cy2 - baseY - k*state.viewAnchor.y;
-        const t = d3.zoomIdentity.translate(tx, ty).scale(k);
-        svg.call(zoom.transform, t);
-        state.tidyZoom = t;
-        appliedPrev = true;
-      }
-    } catch(e) { appliedPrev = false; }
-    state.baseTranslate = { x: baseX, y: baseY };
+    const { zoom, appliedPrev } = setupZoomAndView(svg, g, baseX, baseY);
+    try { svg.on('end', null); } catch(e){}
+    try { zoom.on('end', ()=> { scheduleEdgeLabelResolve(); }); } catch(e){}
 
     // Initial fit to content area on first load of a chapter
     try {
@@ -957,6 +1233,7 @@
     } catch(e) { /* ignore */ }
   }
 
+  /** Render the indented list view (DOM list, not SVG). */
   function renderList(){
     listContainer.innerHTML=''; if(!state.data) return;
     const ul=document.createElement('ul'); ul.className='indented'; listContainer.appendChild(ul);
@@ -1018,6 +1295,14 @@
     line.appendChild(tog); line.appendChild(t); li.appendChild(line);
     if (state.showDetails){ t.style.cursor='pointer'; t.addEventListener('click', ()=> showDetails(node)); }
     if(node.children&&node.children.length){ const ul=document.createElement('ul'); ul.className='indented'; if(!isCollapsed(node)) node.children.forEach(c=> ul.appendChild(renderItem(c,level+1, neighborsList))); li.appendChild(ul);} return li;
+  }
+
+  function ensureListSelectionIntoView(){
+    try {
+      if (!listView || !listView.classList.contains('visible')) return;
+      const sel = listContainer.querySelector('li.node-item.selected');
+      if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    } catch(e){}
   }
 
   function toggleNode(n){ if(!n||n.id==='root')return; if(state.collapsed.has(n.id)) state.collapsed.delete(n.id); else state.collapsed.add(n.id); render(); }
@@ -1250,7 +1535,13 @@
   function showDetails(n){
     if (!detailsPanel) return;
     try { if (n && typeof n.id !== 'undefined') { state.selectedId = n.id; } } catch(e) {}
+    // Sync versions panel active verse on selection
+    try {
+      const vnum = parseNodeVerseNum(n && n.verse);
+      if (vnum) setActiveVerseInPanel(vnum, true);
+    } catch(e){}
     try { render(); } catch(e) {}
+    try { ensureListSelectionIntoView(); } catch(e){}
     // TF 경량 모드: 토큰/글로스가 비어 있으면 지연 로드
     try {
       const needTfFetch = (state && state.source === 'tf') && (!n.tokens || !n.tokens.length) && (String(n.id).match(/^[0-9]+$/));
@@ -1383,6 +1674,32 @@
           .catch(()=>{ const wrap = document.getElementById('phraseSegments'); if (wrap) wrap.innerHTML=''; });
       }
     } catch(e) { /* ignore */ }
+  }
+
+  // Center view on a specific node id (tidy tree)
+  /** Center tidy view on the node with the given id, preserving current zoom. */
+  function centerOnNodeId(id){
+    try {
+      const svg = state.tidySvg; const z = state.tidyZoom; const zoom = state.tidyZoomBehavior; const base = state.baseTranslate || {x:0,y:0};
+      if (!svg || !zoom) return;
+      // find D3 bound node by id
+      const nodes = tidyContainer.querySelectorAll('g.tree-node');
+      let target = null;
+      for (const el of nodes){ const d = el && el.__data__; if (d && d.data && d.data.id === id){ target = d; break; } }
+      if (!target) return;
+      const isH = (state.orientation === 'horizontal');
+      const wx = isH ? target.y : target.x; // world coords in zoom-layer space
+      const wy = isH ? target.x : target.y;
+      const rect = svg.getBoundingClientRect ? svg.getBoundingClientRect() : { width: tidyContainer.clientWidth, height: tidyContainer.clientHeight };
+      const cx = Math.max(0, rect.width/2);
+      const cy = Math.max(0, rect.height/2);
+      const k = (z && z.k && isFinite(z.k)) ? z.k : 1;
+      const tx = cx - base.x - k*wx;
+      const ty = cy - base.y - k*wy;
+      const t = d3.zoomIdentity.translate(tx, ty).scale(k);
+      d3.select(svg).call(zoom.transform, t);
+      state.tidyZoom = t;
+    } catch(e){}
   }
 
   // ---- Prev/Next clause navigation helpers ----

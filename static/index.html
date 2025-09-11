@@ -84,6 +84,15 @@
       <label>
         <input id="toggleDetails" type="checkbox" /> 상세 보기
       </label>
+      <label>
+        Theme
+        <select id="themeSelect">
+          <option value="auto">Auto</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <button id="toggleVersions" title="역본 보기 패널" aria-controls="versionsPanel" aria-expanded="false">역본</button>
     </div>
   </header>
 
@@ -97,6 +106,21 @@
     <div id="detailsResizer" class="resizer horizontal" title="드래그하여 상세 높이 조절"></div>
     <section id="detailsPanel" class="details"></section>
     <aside id="legendPanel" class="legend"></aside>
+    <aside id="versionsPanel" class="versions" role="complementary" aria-labelledby="vpTitle" aria-hidden="true">
+      <div class="vp-header">
+        <strong id="vpTitle">역본</strong>
+        <select id="versionSelect">
+          <option value="knt">KNT</option>
+          <option value="nkrv">NKRV</option>
+          <option value="bhs">BHS</option>
+        </select>
+        <button id="closeVersions" class="icon-btn" title="닫기" aria-label="역본 패널 닫기">×</button>
+      </div>
+      <div class="vp-subhead">
+        <span id="vpRef">-</span>
+      </div>
+      <div id="versionContent" class="versions-content"></div>
+    </aside>
   </main>
 
   <footer class="footer">
@@ -106,6 +130,7 @@
     </small>
   </footer>
 
+  <script src="./theme.js"></script>
   <script src="./app.js"></script>
   <!-- Spinner Overlay & Toast -->
   <div id="spinnerOverlay" aria-hidden="true">

@@ -11,6 +11,13 @@
 - 모듈 실행: `python -m ctt_viewer`
  - 클론 시 항상 서브모듈 포함 권장: `git clone --recurse-submodules <repo>`
 
+### 우측 ‘역본’ 패널(KNT/NKRV/BHS)
+- 상단 바의 `역본` 버튼으로 우측 패널을 열고 닫습니다.
+- 버전을 선택하면 해당 장의 모든 절이 패널에 표시됩니다.
+- 절 위에 마우스를 올리면 트리뷰의 해당 절에 속하는 절/절요소가 1.25배로 확대됩니다.
+- 절을 클릭하면 상세 패널이 열리고, 해당 절의 첫 번째 clause가 자동 선택됩니다.
+- 키보드 지원: Enter/Space로 절 선택, Esc로 패널 닫기, 포커스는 패널 내에서 순환(Tab/Shift+Tab).
+
 ## 비개발자용 빠른 실행 (권장 순서)
 
 ### Windows
@@ -87,7 +94,8 @@ AUTO_INSTALL=1 ./run.sh   # Python 미설치 시 Homebrew로 자동 설치 시�
 - 정적 리소스 경로(설치 환경):
   - 기본적으로 패키지 내부 또는 저장소 루트의 `static/`을 자동 탐지합니다.
   - 필요 시 환경변수로 지정: `STATIC_DIR=/path/to/static`
-  - 폰트/데이터도 지정 가능: `FONT_DIR`, `DATA_CTT_DIR`, `KNT_DIR`
+  - 폰트/데이터도 지정 가능: `FONT_DIR`, `DATA_CTT_DIR`
+  - 역본 데이터 경로 지정(선택): `VERSIONS_DIR`(루트), 또는 개별 `KNT_DIR`, `NKRV_DIR`, `BHS_DIR`
 
 ## Docker 실행
 이미지 빌드/실행 예시는 다음과 같습니다. 대용량 데이터(`data/`)는 이미지에 포함하지 않고 런타임에 마운트하는 것을 권장합니다.

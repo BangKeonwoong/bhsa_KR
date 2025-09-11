@@ -8,9 +8,10 @@ import hashlib
 import re
 import time
 from typing import Optional
+import unicodedata
 
 from .http_utils import resp_304, resp_json, APP_START_GMT, httpdate
-from .paths import font_dir, ctt_data_dir, knt_dir
+from .paths import font_dir, ctt_data_dir, knt_dir, nkrv_dir, bhs_dir
 
 from parser.ctt_parser import parse_ctt_cached, enumerate_ctt_ctypes, parse_ctt
 from parser.bhsa import (
@@ -140,6 +141,15 @@ def _latest_ctt_root_mtime(root: Path | None = None) -> str | None:
     return None
 
 
+def _mtime_httpdate(path: Path | None) -> Optional[str]:
+    try:
+        if path and path.exists():
+            return httpdate(path.stat().st_mtime)
+    except Exception:
+        return None
+    return None
+
+
 def read_knt_verse(book_label: str, chapter: int, verse: int) -> Optional[str]:
     """Read KNT verse text from Markdown files under KNT/<책>/CC.md.
 
@@ -168,6 +178,153 @@ def read_knt_verse(book_label: str, chapter: int, verse: int) -> Optional[str]:
     except Exception:
         return None
     return None
+
+
+def read_knt_chapter(book_label: str, chapter: int) -> Optional[list[dict]]:
+    """Read all verses of a chapter from KNT Markdown under KNT/<책>/CC.md.
+
+    Each verse line looks like: '- 3: 텍스트...'
+    Returns a list of {verse:int, text:str} or None if file missing.
+    """
+    ko_dir = KNT_LABEL_TO_KO.get(book_label.upper())
+    if not ko_dir:
+        return None
+    path = knt_dir() / ko_dir / f"{chapter:02d}.md"
+    if not path.exists():
+        return None
+    pat = re.compile(r"^\s*-\s*(\d+)\s*:\s*(.*)$")
+    verses: list[dict] = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                m = pat.match(line)
+                if not m:
+                    continue
+                try:
+                    v = int(m.group(1))
+                except Exception:
+                    continue
+                verses.append({"verse": v, "text": m.group(2).strip()})
+    except Exception:
+        return None
+    return verses
+
+
+def _nfc(s: str | None) -> str:
+    try:
+        return unicodedata.normalize('NFC', s or '')
+    except Exception:
+        return s or ''
+
+
+def _find_nkrv_book_dir(label: str) -> Optional[Path]:
+    """Find NKRV directory like '01-창세기' by KO book name."""
+    try:
+        root = nkrv_dir()
+        if not root.exists():
+            return None
+        ko = _nfc(KNT_LABEL_TO_KO.get(label.upper()))
+        if not ko:
+            return None
+        best = None
+        for p in root.iterdir():
+            if not p.is_dir():
+                continue
+            name = _nfc(p.name)
+            base = name.split('-', 1)[-1] if '-' in name else name
+            if _nfc(base) == ko:
+                best = p
+                break
+        return best
+    except Exception:
+        return None
+
+
+def read_nkrv_chapter(book_label: str, chapter: int) -> Optional[list[dict]]:
+    """Parse NKRV chapter file: lines '3. 텍스트'"""
+    d = _find_nkrv_book_dir(book_label)
+    if not d:
+        return None
+    path = d / f"{chapter:03d}.md"
+    if not path.exists():
+        return None
+    verses: list[dict] = []
+    pat = re.compile(r"^\s*(\d+)\s*\.\s*(.+)$")
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = pat.match(line)
+                if not m:
+                    continue
+                try:
+                    v = int(m.group(1))
+                except Exception:
+                    continue
+                verses.append({"verse": v, "text": m.group(2).strip()})
+    except Exception:
+        return None
+    return verses
+
+
+def _find_bhs_book_dir(label: str) -> Optional[Path]:
+    """Find BHS directory like '26 Ezekiel' by English name."""
+    try:
+        root = bhs_dir()
+        if not root.exists():
+            return None
+        en = BOOK_LABEL_TO_NAME.get(label.upper())
+        if not en:
+            return None
+        en_low = en.lower()
+        for p in root.iterdir():
+            if not p.is_dir():
+                continue
+            name = p.name.lower()
+            # allow prefix numbers and space
+            if name.endswith(en_low):
+                return p
+        return None
+    except Exception:
+        return None
+
+
+def read_bhs_chapter(book_label: str, chapter: int) -> Optional[list[dict]]:
+    """Parse BHS chapter markdown with optional front-matter.
+
+    After front-matter '---' blocks, lines look like '3 <text>' (Hebrew with spaces/tags).
+    """
+    d = _find_bhs_book_dir(book_label)
+    if not d:
+        return None
+    path = d / f"{chapter:02d}.md"
+    if not path.exists():
+        return None
+    verses: list[dict] = []
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            lines = f.read().splitlines()
+        # Skip front-matter if present
+        i = 0
+        if i < len(lines) and lines[i].strip() == '---':
+            i += 1
+            while i < len(lines) and lines[i].strip() != '---':
+                i += 1
+            if i < len(lines) and lines[i].strip() == '---':
+                i += 1
+        pat = re.compile(r"^\s*(\d+)\s+(.+)$")
+        for j in range(i, len(lines)):
+            line = lines[j]
+            m = pat.match(line)
+            if not m:
+                continue
+            try:
+                v = int(m.group(1))
+            except Exception:
+                continue
+            verses.append({"verse": v, "text": m.group(2).strip()})
+    except Exception:
+        return None
+    return verses
 
 
 @lru_cache(maxsize=LRU_TREE_CACHE)
@@ -449,6 +606,106 @@ def api_knt_verse():
     if inm and (etag in inm):
         return resp_304(etag, lm, ma, swr)
     return resp_json(payload, etag, lm, ma, swr)
+
+
+@api_bp.get("/api/knt/chapter")
+def api_knt_chapter():
+    book = request.args.get("book", "").strip()
+    try:
+        chapter = int(request.args.get("chapter", "0") or 0)
+    except Exception:
+        chapter = 0
+    label = resolve_book_label(book)
+    if not label or not chapter:
+        return jsonify({"error": "invalid parameters"}), 400
+    ko_dir = KNT_LABEL_TO_KO.get(label.upper())
+    kpath = (knt_dir() / ko_dir / f"{chapter:02d}.md") if ko_dir else None
+    data = read_knt_chapter(label, chapter)
+    if data is None:
+        return jsonify({"error": "not found"}), 404
+    payload = json.dumps({"book_label": label, "chapter": chapter, "verses": data}, ensure_ascii=False, separators=(",", ":"))
+    etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+    inm = request.headers.get('If-None-Match', '')
+    lm = _latest_ctt_mtime(kpath)
+    if _is_nocache():
+        return resp_json(payload, etag, lm, 0, 0)
+    ma, swr = _cache_cfg()
+    if inm and (etag in inm):
+        return resp_304(etag, lm, ma, swr)
+    return resp_json(payload, etag, lm, ma, swr)
+
+
+@api_bp.get("/api/versions/chapter")
+def api_versions_chapter():
+    """Unified chapter endpoint for multiple versions (initially KNT).
+
+    Query:
+      - version: knt|nkrv|bhs (case-insensitive)
+      - book: 'genesis' | 'GEN' | full English
+      - chapter: integer
+    """
+    ver = (request.args.get('version', '') or '').strip().lower()
+    book = (request.args.get('book', '') or '').strip()
+    try:
+        chapter = int(request.args.get('chapter', '0') or 0)
+    except Exception:
+        chapter = 0
+    label = resolve_book_label(book)
+    if not ver or not label or not chapter:
+        return jsonify({"error": "invalid parameters"}), 400
+    # For now only KNT is implemented; others will be added in next steps
+    if ver == 'knt':
+        ko_dir = KNT_LABEL_TO_KO.get(label.upper())
+        kpath = (knt_dir() / ko_dir / f"{chapter:02d}.md") if ko_dir else None
+        data = read_knt_chapter(label, chapter)
+        if data is None:
+            return jsonify({"error": "not found"}), 404
+        payload = json.dumps({"version": "knt", "book_label": label, "chapter": chapter, "verses": data}, ensure_ascii=False, separators=(",", ":"))
+        etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+        inm = request.headers.get('If-None-Match', '')
+        lm = _mtime_httpdate(kpath)
+        if _is_nocache():
+            return resp_json(payload, etag, lm, 0, 0)
+        ma, swr = _cache_cfg()
+        if inm and (etag in inm):
+            return resp_304(etag, lm, ma, swr)
+        return resp_json(payload, etag, lm, ma, swr)
+    elif ver == 'nkrv':
+        data = read_nkrv_chapter(label, chapter)
+        # Find path for Last-Modified
+        ko_dir = KNT_LABEL_TO_KO.get(label.upper())
+        pdir = _find_nkrv_book_dir(label)
+        p = (pdir / f"{chapter:03d}.md") if pdir else None
+        if data is None:
+            return jsonify({"error": "not found"}), 404
+        payload = json.dumps({"version": "nkrv", "book_label": label, "chapter": chapter, "verses": data}, ensure_ascii=False, separators=(",", ":"))
+        etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+        inm = request.headers.get('If-None-Match', '')
+        lm = _mtime_httpdate(p)
+        if _is_nocache():
+            return resp_json(payload, etag, lm, 0, 0)
+        ma, swr = _cache_cfg()
+        if inm and (etag in inm):
+            return resp_304(etag, lm, ma, swr)
+        return resp_json(payload, etag, lm, ma, swr)
+    elif ver == 'bhs':
+        data = read_bhs_chapter(label, chapter)
+        pdir = _find_bhs_book_dir(label)
+        p = (pdir / f"{chapter:02d}.md") if pdir else None
+        if data is None:
+            return jsonify({"error": "not found"}), 404
+        payload = json.dumps({"version": "bhs", "book_label": label, "chapter": chapter, "verses": data}, ensure_ascii=False, separators=(",", ":"))
+        etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+        inm = request.headers.get('If-None-Match', '')
+        lm = _mtime_httpdate(p)
+        if _is_nocache():
+            return resp_json(payload, etag, lm, 0, 0)
+        ma, swr = _cache_cfg()
+        if inm and (etag in inm):
+            return resp_304(etag, lm, ma, swr)
+        return resp_json(payload, etag, lm, ma, swr)
+    else:
+        return jsonify({"error": "unknown_version"}), 400
 
 
 @api_bp.get("/api/books/chapters")
