@@ -829,7 +829,7 @@
   // --- Verse utils ---
   /** Parse verse number (int) from a BHSA-like ref string e.g. "GEN 01,03". */
   function verseNumFromRef(vs){
-    try{ const m = /\b([A-Z]{3})\s+(\d{2}),(\d{2})/.exec(String(vs||'')); return m ? (parseInt(m[3],10)||null) : null; } catch(e){ return null; }
+    try{ const m = /\b([0-9A-Z]{3})\s+(\d{2}),(\d{2})/.exec(String(vs||'')); return m ? (parseInt(m[3],10)||null) : null; } catch(e){ return null; }
   }
   /** Convenience wrapper: parse verse number from a node object. */
   function verseNumFromNode(n){ return verseNumFromRef(n && n.verse); }
@@ -1105,7 +1105,7 @@
         : linkGen({source:{x:d.source.x,y:d.source.y},target:{x:d.target.x,y:d.target.y}}));
     // Nodes layer
     const node=g.append('g').selectAll('g').data(root.descendants()).join('g').attr('class','tree-node')
-      .attr('data-verse-num', d => { try { const m = String(d && d.data && d.data.verse || '').match(/^[A-Z]{3}\s+\d{2},(\d{2})/); return m ? String(parseInt(m[1],10)||'') : ''; } catch(e){ return ''; } })
+      .attr('data-verse-num', d => { try { const m = String(d && d.data && d.data.verse || '').match(/^[0-9A-Z]{3}\s+\d{2},(\d{2})/); return m ? String(parseInt(m[1],10)||'') : ''; } catch(e){ return ''; } })
       .attr('data-has-ctype', d => (d && d.data && d.data.ctype) ? '1' : '')
       .attr('transform', d=> {
         const pos = (state.orientation==='horizontal'? `translate(${d.y},${d.x})`: `translate(${d.x},${d.y})`);
@@ -1270,6 +1270,9 @@
 
   function renderItem(node, level, neighborsList){
     const li=document.createElement('li'); li.className='node-item ' + clauseClass(node);
+    // annotate list items for cross-view hover/highlight
+    try { const vnum = verseNumFromNode(node); if (vnum) li.setAttribute('data-verse-num', String(vnum)); } catch(e){}
+    try { li.setAttribute('data-has-ctype', isClauseNode(node) ? '1' : ''); } catch(e){}
     if (state.selectedId && node && node.id===state.selectedId) li.classList.add('selected');
     if (neighborsList && neighborsList.parentId!==null && node && node.id===neighborsList.parentId) li.classList.add('neighbor-parent');
     if (neighborsList && neighborsList.childIds && neighborsList.childIds.has && neighborsList.childIds.has(node.id)) li.classList.add('neighbor-child');
@@ -1609,7 +1612,7 @@
     // KNT 절 텍스트 로드: node.verse("GEN 01,03")에서 장/절 추출하여 백엔드 요청
     try {
       const ref = (function parseVerseRef(s){
-        const m = /\b([A-Z]{3})\s+(\d{2}),(\d{2})/.exec(String(s||''));
+        const m = /\b([0-9A-Z]{3})\s+(\d{2}),(\d{2})/.exec(String(s||''));
         if (!m) return null; return { chapter: parseInt(m[2],10)||0, verse: parseInt(m[3],10)||0 };
       })(verse);
       if (ref && ref.chapter && ref.verse){
