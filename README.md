@@ -1,15 +1,12 @@
 # CTT Viewer (BHSA/Text-Fabric)
 
-간단한 플라스크 기반 뷰어로, CTT 파일과 BHSA(Text‑Fabric) 데이터를 트리 형태로 탐색할 수 있습니다.
+플라스크 기반 웹 앱으로 CTT 파일과 BHSA(Text-Fabric) 데이터를 트리 형태로 탐색합니다.
 
-## 빠른 시작
-- 파이썬 3.9+ 권장, 가상환경 사용 권장
-- 의존성: `Flask`, `text-fabric`
-- 실행:
-  - macOS/Linux: `./run.sh` 또는 `python app.py`
-  - Windows: `start_viewer.bat` 또는 PowerShell `./start_viewer.ps1`
-- 모듈 실행: `python -m ctt_viewer`
- - 클론 시 항상 서브모듈 포함 권장: `git clone --recurse-submodules <repo>`
+## Windows
+
+### 준비물
+- Git (<https://git-scm.com/downloads>)
+- Python 3.9 이상 (<https://www.python.org/downloads/>)
 
 ### 우측 ‘역본’ 패널(KNT/NKRV/BHS)
 - 상단 바의 `역본` 버튼으로 우측 패널을 열고 닫습니다.
@@ -20,31 +17,19 @@
 
 ## 비개발자용 빠른 실행 (권장 순서)
 
-### Windows
-1) Git 설치 후 레포 클론(서브모듈 포함)
-```
+### 설치 및 실행
+```powershell
 git clone --recurse-submodules https://github.com/BangKeonwoong/bhsa_KR.git
 cd bhsa_KR
+start_viewer.bat        # 또는 PowerShell: .\setup_windows.ps1 -AutoInstall
 ```
-2) 실행(권장):
-```
- .\start_viewer.bat
-```
-- PowerShell 정책으로 `.ps1` 실행이 막히는 환경에서도 `.bat`가 자동으로 우회(-ExecutionPolicy Bypass).
-- Python이 없으면 자동으로 embeddable Python(3.11)을 다운로드/설정 후 진행합니다(최초 1회).
+실행 후 브라우저에서 <http://127.0.0.1:5001/> 를 열어 “TF gloss 사용 가능” 메시지를 확인하세요.
 
-옵션: 자동 설치 도우미(winget)
-```
-# winget이 있고, Python/Git 미설치라면 자동 설치 후 실행
-PowerShell> .\setup_windows.ps1 -AutoInstall
-# 또는 환경변수로
-PowerShell> $env:AUTO_INSTALL='1'; .\setup_windows.ps1
-# 실행 정책 오류가 있으면 .bat 래퍼 사용
-CMD> setup_windows.bat -AutoInstall
-```
+## macOS / Linux
 
-3) 브라우저 열림 확인: `http://127.0.0.1:5001/`
-   - 상단 상태가 “TF gloss 사용 가능”이면 정상. 문제가 있으면 `Invoke-RestMethod http://127.0.0.1:5001/api/tf/status`로 확인.
+### 준비물
+- Git (<https://git-scm.com/downloads>)
+- Python 3.9 이상 (<https://www.python.org/downloads/> , macOS는 `brew install python` 도 가능)
 
 문제 해결(Tips)
 - “명령을 인식하지 못함”: PowerShell은 현재 폴더 실행에 `./` 또는 `.\`가 필요합니다. ` .\start_viewer.bat`처럼 실행하세요.
@@ -166,99 +151,22 @@ docker run --rm -it \
 ## 설치 순서(서브모듈 포함, TF 탑재 상태 보장)
 아래 순서를 따르면 Text‑Fabric BHSA가 로컬에 탑재된 상태로 바로 실행됩니다.
 
-1) 레포 클론(서브모듈 포함 필수)
+1) 레포 클론(서브모듈 포함 필수) 및 실행
 ```bash
 git clone --recurse-submodules https://github.com/BangKeonwoong/bhsa_KR.git
 cd bhsa_KR
+./run.sh                # 최초 실행 시 venv 및 의존성 자동 설치
 ```
+권한 오류가 발생하면 `chmod +x run.sh` 후 다시 실행하세요. 서버가 뜨면 브라우저에서 <http://127.0.0.1:5001/> 를 확인합니다.
 
-2) 실행 스크립트로 의존성/환경 준비 및 서버 구동
-- macOS/Linux: `./run.sh`
-- Windows(PowerShell): `./start_viewer.ps1`
+## Docker (선택)
 
-3) 확인(브라우저/상태 API)
-- 브라우저: `http://127.0.0.1:5001/` (상단에 “TF gloss 사용 가능” 표시)
-- API: `curl http://127.0.0.1:5001/api/tf/status` → `{"has_local_bhsa": true, "has_gloss": true}`
-
-참고: 만약 서브모듈 없이 클론했다면 아래 한 번만 실행 후 다시 2단계로 진행하세요.
 ```bash
-git submodule update --init --recursive
+docker build -t ctt-viewer .
+docker run --rm -p 5001:5001 -v $(pwd)/data:/app/data ctt-viewer
 ```
 
-### 대안: Text‑Fabric가 자동으로 내려받도록 사용
-- 로컬에 BHSA가 없을 경우 Text‑Fabric가 사용자 캐시(`~/text-fabric-data`)로 내려받을 수 있습니다. 이 레포의 실행 스크립트(run.sh/start_viewer.ps1)는 사용자 캐시에서 `data/text-fabric-data`로 복사 시도를 합니다.
-- 수동으로 내려받기(예시):
-  ```bash
-  # 가상환경 등에서 실행
-  python - <<'PY'
-from tf.fabric import Fabric
-TF = Fabric(locations='data/text-fabric-data', modules=['etcbc/bhsa/tf/2021'])
-api = TF.load('otext otype oslots')
-print('OK' if api else 'FAIL')
-PY
-  ```
+## 추가 문서
 
-## 주요 엔드포인트
-- `/` 정적 UI
-- `/api/tree` CTT 또는 TF 기반 트리 (query: `book`, `chapter`, `source=tf|ctt`, `lite=1|0`)
-- `/api/tf/status` 로컬 BHSA 및 gloss 기능 가용성
-- `/api/books`, `/api/books/chapters` KNT 기준 책/장 정보
-- `/api/knt/verse` KNT 구절 텍스트 조회
-
-## 설정 (환경변수)
-- `CACHE_MAX_AGE`(기본 300), `CACHE_SWR`(기본 60)
-- `LOG_LEVEL`(기본 INFO), `WERKZEUG_LOG_LEVEL`
-- `ACCESS_LOG`(기본 1), `ACCESS_LOG_SKIP`(기본 `/healthz`)
-- `TF_LOCATIONS`, `TF_LOCAL_DIR`(Text‑Fabric 데이터 탐색 경로)
-- `GLOSS_KO_CSV`(영→한 gloss CSV 경로, 기본 `data/gloss_ko.csv` 자동 탐색)
-
-## 개발 구조
-- `ctt_viewer/`
-  - `__init__.py` 앱 팩토리, 블루프린트 등록
-  - `api.py` API 라우트
-  - `paths.py` 경로 유틸
-  - `http_utils.py` HTTP 캐시/응답 유틸
-  - `logging_config.py` 로깅 설정
-  - `errors.py` 전역 에러 핸들러(JSON)
-  - `middleware.py` 요청 로깅
-  - `__main__.py` 모듈 실행 엔트리
-- `parser/` CTT/BHSA 파서 및 유틸
-- `tests/` 간단 라우트 테스트
-
-## 테스트
-```
-python -m unittest discover -s tests -p "test_*.py" -v
-```
-
-## 릴리즈(태그 기반)
-태그 `v*`를 푸시하면 GitHub Actions가 자동으로 릴리즈를 생성합니다.
-
-1) 버전 업데이트: `pyproject.toml`의 `version`
-2) `CHANGELOG.md` 갱신
-3) 커밋/푸시 후 태그 생성/푸시
-```
-git commit -am "Release: bump to vX.Y.Z"
-git tag -a vX.Y.Z -m "Release vX.Y.Z"
-git push origin main --tags
-```
-4) 릴리즈 확인: GitHub → Releases (자동 릴리즈 노트 생성)
-
-### 릴리즈 ZIP 사용하기
-- Releases 페이지에서 OS별 ZIP을 내려받아 압축 해제합니다.
-  - Windows: `ctt_viewer-windows-vX.Y.Z.zip`
-  - macOS: `ctt_viewer-macos-vX.Y.Z.zip`
-- 추가로 Windows용 "portable" 패키지도 제공합니다: `ctt_viewer-windows-portable-vX.Y.Z.zip`
-  - 포함: Windows embeddable Python + 필요한 패키지(사전 설치)
-  - 실행: `Start Viewer (Portable).bat` (PowerShell/정책/설치 불필요)
-- 포함 내용: 실행 스크립트/코드/정적 파일(대용량 TF 데이터 제외)
-- Windows: `start_viewer.bat` 실행 (필요 시 `setup_windows.ps1 -AutoInstall`)
-- macOS: 더블클릭 `Start Viewer.command` 또는 터미널에서 `./run.sh`
-- 주의: 릴리즈 ZIP에는 BHSA 서브모듈 데이터가 포함되지 않습니다. TF가 자동으로 사용자 캐시로 내려받거나, 개발용으로는 서브모듈 포함 클론을 권장합니다.
-
-### 첫 실행 체크리스트
-- 릴리즈 ZIP에는 `FIRST-RUN-CHECKLIST.md`가 포함되어 있습니다.
-- 주요 확인 사항(요약): Python 설치/의존성 설치, 방화벽/정책 우회, TF/BHSA 상태(`/api/tf/status`), 포트 충돌, 오프라인 설치(`data/wheels/`).
-
-## 참고
-- 최초 실행 시 로컬 BHSA 데이터가 없으면 `run.sh`/`start_viewer.ps1`가 사용자 캐시(`~/text-fabric-data`)에서 복사 시도합니다.
-- 대용량 데이터로 인해 일부 경로는 서브모듈로 관리됩니다.
+- `README-RUN.txt` : 실행 스크립트 상세
+- `README-RUN-windows.txt`, `README-RUN-macOS.txt` : 운영체제별 안내
