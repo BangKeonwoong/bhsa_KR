@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2025-09-11
+### Fixed
+- Versions panel hover/selection fails for books with numeric codes (e.g., 1 Samuel). Regex now accepts `[0-9A-Z]{3}` and list items carry `data-verse-num`/`data-has-ctype` for cross-view highlighting.
+
+### Docs
+- Merge README updates: Windows prerequisites and detailed Versions panel usage retained alongside existing quick-start instructions.
+
 ## [0.3.0] - 2025-09-08
 ### Added
 - Right-side Versions panel with KNT/NKRV/BHS support.
