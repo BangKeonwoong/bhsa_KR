@@ -25,6 +25,7 @@ from parser.bhsa import (
 )
 from parser.books import BOOK_LABEL_TO_NAME, BOOK_DIR, resolve_book_label, KNT_LABEL_TO_KO
 from parser.gloss_ko import gloss_ko_status
+from parser import content_service, versions_io
 
 
 api_bp = Blueprint("api", __name__)
@@ -348,60 +349,14 @@ def read_bhs_chapter(book_label: str, chapter: int) -> Optional[list[dict]]:
 
 @lru_cache(maxsize=LRU_TREE_CACHE)
 def _tree_payload_cached(book_param: str, chapter: int, requested: str, lite: bool, bhsa_avail: bool, max_depth: int) -> tuple[str, str, Optional[str]]:
-    book = (book_param or '').strip().lower()
-    book_label = resolve_book_label(book_param)
-    title = f"{BOOK_LABEL_TO_NAME.get(book_label, book.title())} {chapter}"
-    folder = BOOK_DIR.get(book)
-    use_tf = (requested == 'tf') and bhsa_avail
-    # Build tree
-    tree = None
-    if use_tf:
-        try:
-            tree = parse_chapter_tf_cached(book_label=book_label, chapter=chapter, title=title, include_details=not lite)
-        except Exception:
-            tree = None
-    if tree is None or not isinstance(tree, dict) or not tree.get('children'):
-        data_dir = ctt_data_dir()
-        if folder:
-            path = data_dir / folder / f"{chapter:02d}" / f"{folder}{chapter:02d}.CTT"
-            if path.exists():
-                tree = parse_ctt_cached(path, book_label=book_label, title=title)
-            else:
-                try:
-                    tree = parse_chapter_tf_cached(book_label=book_label, chapter=chapter, title=title, include_details=not lite)
-                except Exception:
-                    tree = None
-        else:
-            try:
-                tree = parse_chapter_tf_cached(book_label=book_label, chapter=chapter, title=title, include_details=not lite)
-            except Exception:
-                tree = None
-    if tree is None:
-        payload = json.dumps({"error": "no data available for this request"}, ensure_ascii=False, separators=(",", ":"))
-        etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
-        return payload, etag, None
-    # lite strip: remove tokens only
-    if lite:
-        def strip(n):
-            if isinstance(n, dict):
-                n.pop('tokens', None)
-                for c in (n.get('children') or []):
-                    strip(c)
-        strip(tree)
-    # optional: limit depth (0 keeps only root)
-    if isinstance(max_depth, int) and max_depth >= 0:
-        def prune(n, d):
-            if not isinstance(n, dict):
-                return
-            if d >= max_depth:
-                # cut off children at this level
-                if 'children' in n:
-                    n['children'] = []
-                return
-            kids = n.get('children') or []
-            for c in kids:
-                prune(c, d+1)
-        prune(tree, 0)
+    tree = content_service.build_tree_data(
+        book_param,
+        chapter,
+        requested,
+        lite,
+        max_depth=max_depth,
+        use_cache=True,
+    )
     payload = json.dumps(tree, ensure_ascii=False, separators=(",", ":"))
     etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
     # Last-Modified based on source data
@@ -423,55 +378,14 @@ def _tree_payload_cached(book_param: str, chapter: int, requested: str, lite: bo
 
 
 def _tree_payload_uncached(book_param: str, chapter: int, requested: str, lite: bool, bhsa_avail: bool, max_depth: int) -> tuple[str, str, Optional[str]]:
-    book = (book_param or '').strip().lower()
-    book_label = resolve_book_label(book_param)
-    title = f"{BOOK_LABEL_TO_NAME.get(book_label, book.title())} {chapter}"
-    folder = BOOK_DIR.get(book)
-    use_tf = (requested == 'tf') and bhsa_avail
-    tree = None
-    if use_tf:
-        try:
-            tree = parse_chapter_tf(book_label=book_label, chapter=chapter, title=title, include_details=not lite)
-        except Exception:
-            tree = None
-    if tree is None or not isinstance(tree, dict) or not tree.get('children'):
-        data_dir = ctt_data_dir()
-        if folder:
-            path = data_dir / folder / f"{chapter:02d}" / f"{folder}{chapter:02d}.CTT"
-            if path.exists():
-                tree = parse_ctt(path, book_label=book_label, title=title)
-            else:
-                try:
-                    tree = parse_chapter_tf(book_label=book_label, chapter=chapter, title=title, include_details=not lite)
-                except Exception:
-                    tree = None
-        else:
-            try:
-                tree = parse_chapter_tf(book_label=book_label, chapter=chapter, title=title, include_details=not lite)
-            except Exception:
-                tree = None
-    if tree is None:
-        payload = json.dumps({"error": "no data available for this request"}, ensure_ascii=False, separators=(",", ":"))
-        etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
-        return payload, etag, None
-    if lite:
-        def strip(n):
-            if isinstance(n, dict):
-                n.pop('tokens', None)
-                for c in (n.get('children') or []):
-                    strip(c)
-        strip(tree)
-    if isinstance(max_depth, int) and max_depth >= 0:
-        def prune(n, d):
-            if not isinstance(n, dict):
-                return
-            if d >= max_depth:
-                if 'children' in n:
-                    n['children'] = []
-                return
-            for c in (n.get('children') or []):
-                prune(c, d+1)
-        prune(tree, 0)
+    tree = content_service.build_tree_data(
+        book_param,
+        chapter,
+        requested,
+        lite,
+        max_depth=max_depth,
+        use_cache=False,
+    )
     payload = json.dumps(tree, ensure_ascii=False, separators=(",", ":"))
     etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
     # Last-Modified similar to cached path
@@ -580,6 +494,10 @@ def api_tree():
     except Exception:
         max_depth = -1
     bhsa_avail = has_local_bhsa_data()
+    if requested == "tf" and bhsa_avail:
+        tf_status = content_service.build_capabilities_data(start_warmup=True, require_details=not lite)
+        if not tf_status.get("ready"):
+            return jsonify({"error": "tf_warming", "tf_status": tf_status}), 503
     try:
         nocache = _is_nocache()
         if nocache:
@@ -598,8 +516,7 @@ def api_tree():
 
 @api_bp.get("/api/books")
 def api_books():
-    items = [{"code": k, "name": v} for k, v in BOOK_LABEL_TO_NAME.items()]
-    return jsonify(items)
+    return jsonify(content_service.build_books_data())
 
 
 @api_bp.get("/api/knt/verse")
@@ -610,9 +527,8 @@ def api_knt_verse():
     label = resolve_book_label(book)
     if not label or not chapter or not verse:
         return jsonify({"error": "invalid parameters"}), 400
-    ko_dir = KNT_LABEL_TO_KO.get(label.upper())
-    kpath = (knt_dir() / ko_dir / f"{chapter:02d}.md") if ko_dir else None
-    text = read_knt_verse(label, chapter, verse)
+    kpath = versions_io.find_knt_chapter_path(label, chapter)
+    text = versions_io.read_knt_verse(label, chapter, verse)
     if text is None:
         return jsonify({"error": "not found"}), 404
     payload = json.dumps({"book_label": label, "chapter": chapter, "verse": verse, "text": text}, ensure_ascii=False, separators=(",", ":"))
@@ -637,9 +553,8 @@ def api_knt_chapter():
     label = resolve_book_label(book)
     if not label or not chapter:
         return jsonify({"error": "invalid parameters"}), 400
-    ko_dir = KNT_LABEL_TO_KO.get(label.upper())
-    kpath = (knt_dir() / ko_dir / f"{chapter:02d}.md") if ko_dir else None
-    data = read_knt_chapter(label, chapter)
+    kpath = versions_io.find_knt_chapter_path(label, chapter)
+    data = versions_io.read_knt_chapter(label, chapter)
     if data is None:
         return jsonify({"error": "not found"}), 404
     payload = json.dumps({"book_label": label, "chapter": chapter, "verses": data}, ensure_ascii=False, separators=(",", ":"))
@@ -672,92 +587,45 @@ def api_versions_chapter():
     label = resolve_book_label(book)
     if not ver or not label or not chapter:
         return jsonify({"error": "invalid parameters"}), 400
-    # For now only KNT is implemented; others will be added in next steps
+    data = content_service.build_version_chapter_data(ver, label, chapter)
+    if not data:
+        if ver not in {'knt', 'nkrv', 'bhs'}:
+            return jsonify({"error": "unknown_version"}), 400
+        return jsonify({"error": "not found"}), 404
     if ver == 'knt':
-        ko_dir = KNT_LABEL_TO_KO.get(label.upper())
-        kpath = (knt_dir() / ko_dir / f"{chapter:02d}.md") if ko_dir else None
-        data = read_knt_chapter(label, chapter)
-        if data is None:
-            return jsonify({"error": "not found"}), 404
-        payload = json.dumps({"version": "knt", "book_label": label, "chapter": chapter, "verses": data}, ensure_ascii=False, separators=(",", ":"))
-        etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
-        inm = request.headers.get('If-None-Match', '')
-        lm = _mtime_httpdate(kpath)
-        if _is_nocache():
-            return resp_json(payload, etag, lm, 0, 0)
-        ma, swr = _cache_cfg()
-        if inm and (etag in inm):
-            return resp_304(etag, lm, ma, swr)
-        return resp_json(payload, etag, lm, ma, swr)
+        path = versions_io.find_knt_chapter_path(label, chapter)
     elif ver == 'nkrv':
-        data = read_nkrv_chapter(label, chapter)
-        # Find path for Last-Modified
-        ko_dir = KNT_LABEL_TO_KO.get(label.upper())
-        pdir = _find_nkrv_book_dir(label)
-        p = (pdir / f"{chapter:03d}.md") if pdir else None
-        if data is None:
-            return jsonify({"error": "not found"}), 404
-        payload = json.dumps({"version": "nkrv", "book_label": label, "chapter": chapter, "verses": data}, ensure_ascii=False, separators=(",", ":"))
-        etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
-        inm = request.headers.get('If-None-Match', '')
-        lm = _mtime_httpdate(p)
-        if _is_nocache():
-            return resp_json(payload, etag, lm, 0, 0)
-        ma, swr = _cache_cfg()
-        if inm and (etag in inm):
-            return resp_304(etag, lm, ma, swr)
-        return resp_json(payload, etag, lm, ma, swr)
+        path = versions_io.find_nkrv_chapter_path(label, chapter)
     elif ver == 'bhs':
-        data = read_bhs_chapter(label, chapter)
-        pdir = _find_bhs_book_dir(label)
-        p = (pdir / f"{chapter:02d}.md") if pdir else None
-        if data is None:
-            return jsonify({"error": "not found"}), 404
-        payload = json.dumps({"version": "bhs", "book_label": label, "chapter": chapter, "verses": data}, ensure_ascii=False, separators=(",", ":"))
-        etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
-        inm = request.headers.get('If-None-Match', '')
-        lm = _mtime_httpdate(p)
-        if _is_nocache():
-            return resp_json(payload, etag, lm, 0, 0)
-        ma, swr = _cache_cfg()
-        if inm and (etag in inm):
-            return resp_304(etag, lm, ma, swr)
-        return resp_json(payload, etag, lm, ma, swr)
+        path = versions_io.find_bhs_chapter_path(label, chapter)
     else:
         return jsonify({"error": "unknown_version"}), 400
+    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
+    inm = request.headers.get('If-None-Match', '')
+    lm = _mtime_httpdate(path)
+    if _is_nocache():
+        return resp_json(payload, etag, lm, 0, 0)
+    ma, swr = _cache_cfg()
+    if inm and (etag in inm):
+        return resp_304(etag, lm, ma, swr)
+    return resp_json(payload, etag, lm, ma, swr)
 
 
 @api_bp.get("/api/books/chapters")
 def api_books_chapters():
-    items = []
+    items = content_service.build_books_chapters_data()
     latest_mtime = 0.0
     KNT_DIR = knt_dir()
-    for code, name in BOOK_LABEL_TO_NAME.items():
-        ko_dir = KNT_LABEL_TO_KO.get(code)
-        max_ch = 0
-        path = KNT_DIR / ko_dir if ko_dir else None
-        if path and path.exists() and path.is_dir():
-            try:
-                for p in path.iterdir():
-                    if not p.is_file():
-                        continue
-                    fn = p.name
-                    if len(fn) >= 5 and fn.endswith('.md'):
-                        try:
-                            ch = int(fn[:2])
-                            if ch > max_ch:
-                                max_ch = ch
-                        except Exception:
-                            pass
-                    try:
-                        mt = p.stat().st_mtime
-                        if mt > latest_mtime:
-                            latest_mtime = mt
-                    except Exception:
-                        pass
-            except Exception:
-                max_ch = max_ch or 0
-        items.append({ 'code': code, 'name': name, 'chapters': int(max_ch) })
+    if KNT_DIR.exists():
+        try:
+            for path in KNT_DIR.rglob("*.md"):
+                try:
+                    latest_mtime = max(latest_mtime, path.stat().st_mtime)
+                except Exception:
+                    pass
+        except Exception:
+            latest_mtime = latest_mtime
     payload = json.dumps(items, ensure_ascii=False, separators=(",", ":"))
     etag = hashlib.md5(payload.encode('utf-8')).hexdigest()
     inm = request.headers.get('If-None-Match', '')
@@ -892,10 +760,8 @@ def api_gloss_status():
 
 @api_bp.get("/api/tf/status")
 def api_tf_status():
-    return jsonify({
-        "has_local_bhsa": bool(has_local_bhsa_data()),
-        "has_gloss": bool(has_tf_gloss_feature()),
-    })
+    require_details = (request.args.get("details", "0") or "0").lower() in ("1", "true", "yes")
+    return jsonify(content_service.build_capabilities_data(start_warmup=True, require_details=require_details))
 
 
 def register_misc_routes(app, root: Path) -> None:

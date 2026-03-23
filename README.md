@@ -120,6 +120,37 @@ docker run --rm -it \
 ## API 문서
 - OpenAPI 스펙: `/openapi.yaml`
 - 문서 UI(Redoc): `/api/docs`
+- 정적 배포 산출물에도 `openapi.yaml`, `api-docs.html`이 포함되지만, 내용은 로컬 Flask API 기준 참고 문서입니다.
+
+## 정적 배포
+
+이 프로젝트는 이제 로컬 Flask 서버 모드와 별도로 정적 호스트용 export를 지원합니다.
+
+### 정적 사이트 export
+```bash
+python3 scripts/export_static.py --out dist
+```
+
+선택 옵션
+- 특정 책만 export: `--books genesis`
+- 책당 장 수 제한: `--max-chapters 1`
+
+### 로컬 정적 스모크 테스트
+```bash
+python3 scripts/export_static.py --out dist
+python3 -m http.server 8000 -d dist
+```
+
+브라우저에서 `http://127.0.0.1:8000/`를 열고 확인하세요.
+- 책/장 선택
+- TF/CTT source 전환
+- 상세 패널
+- 역본 패널
+- 브라우저 네트워크 탭에서 `/api/*` 요청이 없는지 확인
+
+### GitHub Pages
+- `.github/workflows/pages.yml` 이 `main` 브랜치 push 또는 수동 실행 시 `dist/`를 생성해 Pages에 배포합니다.
+- Pages는 저장소 서브패스를 사용하므로, 정적 모드 자산과 데이터는 모두 상대 경로로 로드됩니다.
 
 
 ## 데이터

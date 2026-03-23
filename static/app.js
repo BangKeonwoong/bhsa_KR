@@ -12,6 +12,8 @@
     anchorMode: 'center',
     fitDoneFor: new Set(),
     lastHoverVerse: null,
+    runtime: { mode: 'server', manifest: null },
+    versionChapterCache: new Map(),
   };
   const elBook = document.getElementById('book');
   const elChapter = document.getElementById('chapter');
@@ -51,6 +53,7 @@
   const spinOverlay = document.getElementById('spinnerOverlay');
   const toastEl = document.getElementById('toast');
   const themeSelect = document.getElementById('themeSelect');
+  const dataClient = window.CTTDataClient || null;
 
   // --- Local storage helpers ---
   const LS_PREFIX = 'cttViewer:';
@@ -405,55 +408,192 @@
     return { json, etag, fromCache: false };
   }
 
+  function sleep(ms){
+    return new Promise(resolve => window.setTimeout(resolve, ms));
+  }
+
+  function tfStatusUrl(requireDetails){
+    const url = new URL('./api/tf/status', document.baseURI);
+    if (requireDetails) url.searchParams.set('details', '1');
+    return url.toString();
+  }
+
+  function setLoadStatus(message, className, actions){
+    if (!elLoadStatus) return;
+    const html = [`<span>${escapeHtml(message || '')}</span>`];
+    if (Array.isArray(actions) && actions.length){
+      html.push(actions.map((action, idx) => (
+        `<button type="button" class="status-action" data-status-action="${idx}">${escapeHtml(action.label || '')}</button>`
+      )).join(' '));
+    }
+    elLoadStatus.innerHTML = html.join(' ');
+    elLoadStatus.className = className || 'status';
+    if (Array.isArray(actions) && actions.length){
+      elLoadStatus.querySelectorAll('[data-status-action]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = parseInt(btn.getAttribute('data-status-action') || '-1', 10);
+          const action = actions[idx];
+          if (action && typeof action.onClick === 'function'){
+            try { action.onClick(); } catch(e) { /* ignore */ }
+          }
+        });
+      });
+    }
+  }
+
+  function renderTfStatusBadge(st){
+    const el = document.getElementById('glossStatus');
+    if (!el) return;
+    if (!st || !st.has_local_bhsa){
+      el.textContent = 'TF 미탑재: gloss 제한';
+      el.className = 'status warn';
+      return;
+    }
+    if (st.phase === 'error'){
+      el.textContent = 'TF 준비 실패';
+      el.className = 'status err';
+      return;
+    }
+    if (!st.ready){
+      el.textContent = st.message || 'TF 초기화 중';
+      el.className = 'status warn';
+      return;
+    }
+    if (!st.has_gloss){
+      el.textContent = 'TF gloss 없음: 영어/한글 gloss 제한';
+      el.className = 'status warn';
+      return;
+    }
+    el.textContent = 'TF gloss 사용 가능';
+    el.className = 'status ok';
+  }
+
+  async function fetchTfStatus(requireDetails){
+    if (state.runtime && state.runtime.mode === 'static'){
+      const st = dataClient ? await dataClient.fetchJson(dataClient.buildCapabilitiesUrl()) : null;
+      const staticStatus = Object.assign({
+        ready: true,
+        warming: false,
+        details_ready: true,
+        phase: 'ready',
+        message: '정적 데이터 사용 중',
+        last_error: null,
+      }, st || {});
+      renderTfStatusBadge(staticStatus);
+      return staticStatus;
+    }
+    const res = await fetch(tfStatusUrl(!!requireDetails), { cache: 'no-store' });
+    const st = await res.json();
+    renderTfStatusBadge(st);
+    return st;
+  }
+
+  function makeCttFallbackAction(){
+    return {
+      label: 'CTT 보기',
+      onClick: () => {
+        try {
+          if (selSource) selSource.value = 'ctt';
+          setPref('source', 'ctt');
+          updateUrlFromState(false);
+        } catch(e) { /* ignore */ }
+        loadData();
+      },
+    };
+  }
+
+  function renderTfWaitStatus(st, requireDetails){
+    const message = (st && st.message)
+      || (requireDetails ? 'gloss/상세 데이터 준비 중' : '히브리 원문 feature 로딩 중');
+    const actions = [{ label: '다시 확인', onClick: () => { loadData(); } }];
+    const fallbackCandidates = preferredTreeSources(elBook.value || 'genesis', elChapter.value || 1);
+    if (Array.isArray(fallbackCandidates) && fallbackCandidates.includes('ctt')){
+      actions.push(makeCttFallbackAction());
+    }
+    setLoadStatus(
+      `TF 데이터를 초기화하는 중입니다. 첫 실행은 오래 걸릴 수 있습니다. ${message}`,
+      'status warn',
+      actions
+    );
+  }
+
+  async function waitForTfReady(requireDetails){
+    let st = null;
+    try {
+      st = await fetchTfStatus(requireDetails);
+    } catch (e) {
+      setLoadStatus('TF 상태를 확인하지 못했습니다. 다시 시도해 주세요.', 'status err', [
+        { label: '다시 시도', onClick: () => { loadData(); } },
+      ]);
+      return false;
+    }
+    if (!st || !st.has_local_bhsa) return false;
+    if (st.ready) return true;
+    renderTfWaitStatus(st, requireDetails);
+    const deadline = Date.now() + 120000;
+    while (Date.now() < deadline){
+      await sleep(1200);
+      st = await fetchTfStatus(requireDetails).catch(() => null);
+      if (st && st.ready) return true;
+      if (st && st.phase === 'error'){
+        setLoadStatus(st.message || 'TF 준비 실패', 'status err', [
+          { label: '다시 시도', onClick: () => { loadData(); } },
+          makeCttFallbackAction(),
+        ]);
+        return false;
+      }
+      renderTfWaitStatus(st, requireDetails);
+    }
+    setLoadStatus(
+      'TF 초기화가 예상보다 오래 걸리고 있습니다. 잠시 후 다시 시도하거나 CTT 보기로 전환할 수 있습니다.',
+      'status warn',
+      [
+        { label: '다시 시도', onClick: () => { loadData(); } },
+        makeCttFallbackAction(),
+      ]
+    );
+    return false;
+  }
+
   async function initTfStatus(){
     try {
-      const res = await fetch('/api/tf/status');
-      if (!res.ok) return;
-      const st = await res.json();
-      const el = document.getElementById('glossStatus');
-      if (!el) return;
-      if (!st || !st.has_local_bhsa){ el.textContent = 'TF 미탑재: gloss 제한'; el.className = 'status warn'; return; }
-      if (!st.has_gloss){ el.textContent = 'TF gloss 없음: 영어/한글 gloss 제한'; el.className = 'status warn'; return; }
-      el.textContent = 'TF gloss 사용 가능'; el.className = 'status ok';
+      await fetchTfStatus(false);
     } catch (e) { /* no-op */ }
   }
 
   async function initBooks() {
     try {
-      const res = await fetch('/api/books');
-      if (!res.ok) return;
-      const books = await res.json();
+      const runtime = dataClient ? await dataClient.detectRuntime() : { mode: 'server', manifest: null };
+      state.runtime = runtime || { mode: 'server', manifest: null };
+      const books = (runtime && runtime.mode === 'static' && runtime.manifest && Array.isArray(runtime.manifest.books))
+        ? runtime.manifest.books.map(b => ({ book: b.book, code: b.label, name: b.name, chapters: b.chapters }))
+        : (dataClient ? await dataClient.fetchJson(dataClient.buildBooksUrl()) : []);
       if (!Array.isArray(books) || !books.length) return;
       state.books = books;
       elBook.innerHTML = '';
       for (const b of books) {
         const opt = document.createElement('option');
-        opt.value = (b.name || '').toLowerCase();
+        opt.value = (b.book || b.name || '').toLowerCase();
         opt.textContent = b.name || '';
         elBook.appendChild(opt);
       }
       try { state.booksOrder = Array.from(elBook.options).map(o => String(o.value)); } catch(e) { state.booksOrder = null; }
       const gen = Array.from(elBook.options).find(o => (o.textContent || '').toLowerCase() === 'genesis');
       if (gen) elBook.value = gen.value;
-      // Fetch per-book chapter counts
-      try {
-        const r2 = await fetch('/api/books/chapters');
-        if (r2.ok){
-          const list = await r2.json();
-          // Map by lowercased full English name
-          const map = {};
-          if (Array.isArray(list)){
-            for (const it of list){
-              const nm = (it && it.name) ? String(it.name).toLowerCase() : '';
-              const ch = (it && typeof it.chapters === 'number') ? Math.max(0, it.chapters|0) : 0;
-              if (nm) map[nm] = ch;
-            }
-          }
-          state.bookChapters = map;
-          // Clamp chapter input max according to current book
-          try { updateChapterMaxForBook(elBook.value); } catch(e){}
+      const list = (runtime && runtime.mode === 'static' && runtime.manifest && Array.isArray(runtime.manifest.books))
+        ? runtime.manifest.books.map(b => ({ book: b.book, code: b.label, name: b.name, chapters: b.chapters }))
+        : (dataClient ? await dataClient.fetchJson(dataClient.buildBooksChaptersUrl()) : []);
+      const map = {};
+      if (Array.isArray(list)){
+        for (const it of list){
+          const nm = String(it && (it.book || it.name || '')).toLowerCase();
+          const ch = (it && typeof it.chapters === 'number') ? Math.max(0, it.chapters|0) : 0;
+          if (nm) map[nm] = ch;
         }
-      } catch(e) { /* ignore */ }
+      }
+      state.bookChapters = map;
+      try { updateChapterMaxForBook(elBook.value); } catch(e){}
+      try { syncSourceOptions(elBook.value, elChapter.value || 1); syncVersionOptions(elBook.value, elChapter.value || 1); } catch(e){}
     } catch (e) { /* ignore */ }
   }
 
@@ -471,6 +611,7 @@
     if (bookVal) elBook.value = bookVal;
     if (chap) elChapter.value = String(chap);
     try { updateChapterMaxForBook(elBook.value); } catch(e){}
+    try { syncSourceOptions(elBook.value, elChapter.value || 1); syncVersionOptions(elBook.value, elChapter.value || 1); } catch(e){}
     try { setPref('book', elBook.value||''); setPref('chapter', elChapter.value||''); } catch(e){}
     updateUrlFromState(false);
     loadData();
@@ -486,14 +627,60 @@
     const maxCh = getMaxChapterForBook(bookVal);
     if (maxCh && elChapter){ elChapter.max = String(maxCh); }
   }
+  function getChapterAvailability(bookVal, chap){
+    try {
+      if (!dataClient || !state.runtime || state.runtime.mode !== 'static') return null;
+      return dataClient.getAvailability(String(bookVal || '').toLowerCase(), chap);
+    } catch(e){ return null; }
+  }
+  function syncSourceOptions(bookVal, chap){
+    if (!selSource) return;
+    const availability = getChapterAvailability(bookVal, chap);
+    const supported = availability && Array.isArray(availability.tree) ? new Set(availability.tree) : null;
+    Array.from(selSource.options).forEach(opt => {
+      if (!opt.value) { opt.disabled = false; return; }
+      opt.disabled = !!(supported && !supported.has(opt.value));
+    });
+    if (selSource.value && selSource.options[selSource.selectedIndex] && selSource.options[selSource.selectedIndex].disabled){
+      selSource.value = '';
+    }
+  }
+  function syncVersionOptions(bookVal, chap){
+    if (!selVersion) return;
+    const availability = getChapterAvailability(bookVal, chap);
+    const supported = availability && Array.isArray(availability.versions) ? new Set(availability.versions) : null;
+    let firstEnabled = null;
+    Array.from(selVersion.options).forEach(opt => {
+      opt.disabled = !!(supported && !supported.has(opt.value));
+      if (!opt.disabled && firstEnabled === null) firstEnabled = opt.value;
+    });
+    if (selVersion.value && selVersion.options[selVersion.selectedIndex] && selVersion.options[selVersion.selectedIndex].disabled){
+      selVersion.value = firstEnabled || 'knt';
+    }
+  }
+  function preferredTreeSources(bookVal, chap){
+    const sourcePref = selSource ? (selSource.value || '') : '';
+    const availability = getChapterAvailability(bookVal, chap);
+    if (availability && Array.isArray(availability.tree)){
+      if (sourcePref && availability.tree.includes(sourcePref)) return [sourcePref];
+      if (availability.tree.includes('tf')) return ['tf'];
+      if (availability.tree.includes('ctt')) return ['ctt'];
+      return [];
+    }
+    if (sourcePref === 'tf') return ['tf'];
+    if (sourcePref === 'ctt') return ['ctt'];
+    return ['tf', 'ctt'];
+  }
   async function candidateHasData(bookVal, chap){
     try {
-      const url1 = `/api/tree?book=${encodeURIComponent(bookVal)}&chapter=${encodeURIComponent(chap)}&lite=1`;
+      const availability = getChapterAvailability(bookVal, chap);
+      if (availability) return Array.isArray(availability.tree) && availability.tree.length > 0;
+      const url1 = dataClient.buildTreeUrl({ book: bookVal, chapter: chap, lite: true });
       const r1 = await fetchJsonCached(url1).catch(()=>null);
       const j1 = r1 && r1.json;
       if (j1 && Array.isArray(j1.children) && j1.children.length) return true;
       if (j1 && j1.error) return false;
-      const url2 = `/api/tree?book=${encodeURIComponent(bookVal)}&chapter=${encodeURIComponent(chap)}&source=ctt&lite=1`;
+      const url2 = dataClient.buildTreeUrl({ book: bookVal, chapter: chap, source: 'ctt', lite: true });
       const r2 = await fetchJsonCached(url2).catch(()=>null);
       const j2 = r2 && r2.json;
       return !!(j2 && Array.isArray(j2.children) && j2.children.length);
@@ -593,36 +780,40 @@
   async function loadData() {
     const book = elBook.value || 'genesis';
     const chapter = elChapter.value || 1;
-    const sourcePref = selSource ? (selSource.value || '') : '';
+    let sources = preferredTreeSources(book, chapter);
     const startTs = performance.now();
-    if (elLoadStatus){ elLoadStatus.textContent = '불러오는 중…'; elLoadStatus.className = 'status'; }
+    setLoadStatus('불러오는 중…', 'status');
     showSpinner();
-    let r1 = null;
-    try {
-      // 경량 모드(lite=1) 기본. 소스가 지정된 경우에는 강제 사용
-      if (sourcePref === 'tf'){
-        const url = `/api/tree?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}&source=tf&lite=1`;
-        r1 = await fetchJsonCached(url).catch(()=>null);
-      } else if (sourcePref === 'ctt'){
-        const url = `/api/tree?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}&source=ctt&lite=1`;
-        r1 = await fetchJsonCached(url).catch(()=>null);
-      } else {
-        const url1 = `/api/tree?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}&lite=1`;
-        r1 = await fetchJsonCached(url1).catch(()=>null);
-        if (!r1){
-          const url2 = `/api/tree?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}&source=ctt&lite=1`;
-          r1 = await fetchJsonCached(url2).catch(()=>null);
+    if (sources[0] === 'tf' && (!state.runtime || state.runtime.mode !== 'static')){
+      const tfStatus = await fetchTfStatus(false).catch(() => null);
+      if (tfStatus && !tfStatus.has_local_bhsa){
+        sources = sources.filter(source => source !== 'tf');
+      } else if (tfStatus && !tfStatus.ready){
+        const ready = await waitForTfReady(false);
+        if (!ready){
+          hideSpinner();
+          return;
         }
       }
+    }
+    let r1 = null;
+    try {
+      for (const source of sources){
+        const url = dataClient.buildTreeUrl({ book, chapter, source, lite: true });
+        r1 = await fetchJsonCached(url).catch(()=>null);
+        const json = r1 && r1.json;
+        if (json && !json.error) break;
+      }
     } catch(e){ /* handled below */ }
-    if (!r1){
-      if (elLoadStatus){ elLoadStatus.textContent = '로드 실패'; elLoadStatus.className = 'status err'; }
+    if (!r1 || !r1.json || r1.json.error){
+      setLoadStatus('로드 실패', 'status err');
       showToast('데이터 로드 실패', 'err');
       hideSpinner();
       return;
     }
     state.data = r1.json;
-    state.source = (state.data && state.data.source) ? state.data.source : (sourcePref || 'tf');
+    state.source = (state.data && state.data.source) ? state.data.source : (sources[0] || 'tf');
+    try { syncSourceOptions(book, chapter); syncVersionOptions(book, chapter); } catch(e){}
     state.collapsed.clear();
     // 깊이 슬라이더 최대값/초기값 설정 (트리 높이 기반)
     try {
@@ -636,12 +827,9 @@
       recomputeCollapsedToDepth();
     } catch(e) { /* ignore */ }
     render();
-    if (elLoadStatus){
-      const ms = Math.max(0, performance.now() - startTs).toFixed(0);
-      const src = state.source ? state.source.toUpperCase() : '';
-      elLoadStatus.textContent = `${src} ${ms}ms`;
-      elLoadStatus.className = 'status ok';
-    }
+    const ms = Math.max(0, performance.now() - startTs).toFixed(0);
+    const src = state.source ? state.source.toUpperCase() : '';
+    setLoadStatus(`${src} ${ms}ms`, 'status ok');
     showToast('불러오기 완료', 'ok');
     hideSpinner();
     // Ensure resizer visibility matches panel state on first load
@@ -658,18 +846,36 @@
     return found;
   }
 
-  async function reloadWithDetails(){
+  function findNodeById(root, targetId){
+    let found = null;
+    (function walk(node){
+      if (!node || found) return;
+      if (node.id === targetId) { found = node; return; }
+      const kids = node.children || [];
+      for (const child of kids) walk(child);
+    })(root);
+    return found;
+  }
+
+  async function reloadWithDetails(selectedId){
     try{
       const book = elBook.value || 'genesis';
       const chapter = elChapter.value || 1;
-      const sourcePref = selSource ? (selSource.value || '') : '';
-      const src = sourcePref ? `&source=${encodeURIComponent(sourcePref)}` : '';
-      const url = `/api/tree?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(chapter)}${src}&lite=0`;
+      const sources = preferredTreeSources(book, chapter);
+      if ((sources[0] || state.source) === 'tf' && (!state.runtime || state.runtime.mode !== 'static')){
+        const ready = await waitForTfReady(true);
+        if (!ready) return;
+      }
+      const url = dataClient.buildTreeUrl({ book, chapter, source: sources[0] || state.source || 'tf', lite: false });
       showSpinner();
       const r = await fetchJsonCached(url);
       state.data = r.json;
       state.source = (state.data && state.data.source) ? state.data.source : state.source;
       render();
+      if (selectedId !== undefined && selectedId !== null){
+        const refreshed = findNodeById(state.data, selectedId);
+        if (refreshed) showDetails(refreshed);
+      }
     }catch(e){ render(); showToast('상세 불러오기 실패', 'err'); }
     finally { hideSpinner(); }
   }
@@ -749,7 +955,7 @@
   }
   /** Build unified versions API URL for fetch. */
   function versionsApiUrl(version, book, chapter){
-    return `/api/versions/chapter?version=${encodeURIComponent(String(version||''))}&book=${encodeURIComponent(String(book||''))}&chapter=${encodeURIComponent(String(chapter||''))}`;
+    return dataClient.buildVersionChapterUrl({ version, book, chapter });
   }
   /** Render loading placeholder into versions panel. */
   function setVersionsPanelLoading(){ if (versionContent) versionContent.innerHTML = `<div class=\"empty\">불러오는 중…</div>`; }
@@ -761,10 +967,13 @@
   }
   /** Fetch verses for (version,book,chapter). Returns {verses:Array, ok:boolean}. */
   async function fetchVersionsChapter(version, book, chapter){
+    const key = `${String(version||'').toLowerCase()}|${String(book||'').toLowerCase()}|${parseInt(chapter, 10) || 0}`;
+    if (state.versionChapterCache.has(key)) return state.versionChapterCache.get(key);
     const r = await fetchJsonCached(versionsApiUrl(version, book, chapter));
     const j = r && r.json;
-    if (!j || !Array.isArray(j.verses)) return { verses: [], ok: false };
-    return { verses: j.verses, ok: true };
+    const result = (!j || !Array.isArray(j.verses)) ? { verses: [], ok: false } : { verses: j.verses, ok: true };
+    state.versionChapterCache.set(key, result);
+    return result;
   }
   /** Load panel content by calling fetch helper and rendering or erroring. */
   async function loadVersionsPanel(version, book, chapter){
@@ -784,6 +993,7 @@
       const ver = ((selVersion && selVersion.value) || 'knt').toLowerCase();
       const book = elBook.value || 'genesis';
       const chapter = parseInt(elChapter.value || '1', 10) || 1;
+      syncVersionOptions(book, chapter);
       await loadVersionsPanel(ver, book, chapter);
     } catch(e){ setVersionsPanelError(); }
   }
@@ -1545,26 +1755,14 @@
     } catch(e){}
     try { render(); } catch(e) {}
     try { ensureListSelectionIntoView(); } catch(e){}
-    // TF 경량 모드: 토큰/글로스가 비어 있으면 지연 로드
+    // 경량 트리에서 상세 필드가 빠져 있으면 full tree로 승격 로드
     try {
-      const needTfFetch = (state && state.source === 'tf') && (!n.tokens || !n.tokens.length) && (String(n.id).match(/^[0-9]+$/));
-      if (needTfFetch){
+      const missingTokens = !Array.isArray(n.tokens) || !n.tokens.length;
+      const missingSegments = (state && state.source === 'tf') && !Array.isArray(n.phrase_segments);
+      const needFullTree = (missingTokens || missingSegments) && (String(n.id).match(/^[0-9]+$/));
+      if (needFullTree){
         detailsPanel.innerHTML = '<div class="kv">세부 정보를 불러오는 중...</div>';
-        fetchJsonCached(`/api/tf/node?id=${encodeURIComponent(n.id)}`)
-          .then(r => r && r.json ? r.json : null)
-          .then(data => {
-            if (!data) { return; }
-            // 병합
-            n.tokens = Array.isArray(data.tokens) ? data.tokens : [];
-            if (data.gloss) n.gloss = data.gloss;
-            if (data.gloss_ko) n.gloss_ko = data.gloss_ko;
-            if (data.rela) n.rela = data.rela;
-            if (data.text_type) n.text_type = data.text_type;
-            if (data.funcs) n.funcs = data.funcs;
-            // 다시 렌더링
-            try { showDetails(n); } catch(e) {}
-          })
-          .catch(()=>{});
+        reloadWithDetails(n.id).catch(()=>{});
         return;
       }
     } catch(e) { /* ignore */ }
@@ -1617,13 +1815,13 @@
       })(verse);
       if (ref && ref.chapter && ref.verse){
         const book = (elBook && elBook.value) ? elBook.value : '';
-        fetchJsonCached(`/api/knt/verse?book=${encodeURIComponent(book)}&chapter=${encodeURIComponent(ref.chapter)}&verse=${encodeURIComponent(ref.verse)}`)
-          .then(r => r && r.json ? r.json : null)
-          .then(data => {
+        fetchVersionsChapter('knt', book, ref.chapter)
+          .then(result => {
             const line = document.getElementById('kntVerseLine');
             if (!line) return;
-            if (data && data.text){
-              line.innerHTML = `<b>KNT</b>: ${escapeHtml(data.text)}`;
+            const verseItem = result && result.ok ? (result.verses || []).find(v => (parseInt(v && v.verse, 10) || 0) === ref.verse) : null;
+            if (verseItem && verseItem.text){
+              line.innerHTML = `<b>KNT</b>: ${escapeHtml(String(verseItem.text))}`;
             } else {
               line.innerHTML = '';
             }
@@ -1633,48 +1831,44 @@
     } catch(e) { /* ignore */ }
     // 구(phrase) 분해 로드 (칩 표시 + 토큰 표 색상 연동)
     try {
-      const nid = n && n.id;
-      if (nid && String(nid).match(/^[0-9]+$/)){
-        fetchJsonCached(`/api/tf/phrases?node_id=${encodeURIComponent(nid)}&level=phrase`)
-          .then(r => r && r.json ? r.json : null)
-          .then(data => {
-            const wrap = document.getElementById('phraseSegments');
-            if (wrap){
-              if (!data || !Array.isArray(data.segments)) { wrap.innerHTML=''; return; }
-              const chips = data.segments.map(seg => phraseChip(seg)).join(' ');
-              wrap.innerHTML = chips;
-            }
-            // 토큰 표 색상 연동: 구 토큰 wid → 카테고리 클래스로 매핑하여 1,2열에 클래스 부여
-            if (data && Array.isArray(data.segments)){
-              const map = new Map();
-              data.segments.forEach(seg => {
-                const cat = String(seg && seg.cat || 'other');
-                const cls = `ph-${cat}`;
-                const toks = Array.isArray(seg && seg.tokens) ? seg.tokens : [];
-                toks.forEach(t => {
-                  if (t && (t.wid!==undefined && t.wid!==null)){
-                    map.set(String(t.wid), cls);
-                  }
-                });
-              });
-              const tbody = detailsPanel.querySelector('.token-table tbody');
-              if (tbody){
-                tbody.querySelectorAll('tr').forEach(tr => {
-                  const wid = tr.getAttribute('data-wid');
-                  if (!wid) return;
-                  const cls = map.get(wid);
-                  if (!cls) return;
-                  const tds = tr.querySelectorAll('td');
-                  if (tds && tds.length){
-                    // 형태(히브리), 해석(영) 컬럼만 색상 적용
-                    tds[0].classList.add(cls);
-                    tds[1].classList.add(cls);
-                  }
-                });
+      const wrap = document.getElementById('phraseSegments');
+      const applySegments = (segments) => {
+        if (wrap){
+          if (!Array.isArray(segments) || !segments.length) { wrap.innerHTML=''; return; }
+          wrap.innerHTML = segments.map(seg => phraseChip(seg)).join(' ');
+        }
+        if (Array.isArray(segments)){
+          const map = new Map();
+          segments.forEach(seg => {
+            const cat = String(seg && seg.cat || 'other');
+            const cls = `ph-${cat}`;
+            const toks = Array.isArray(seg && seg.tokens) ? seg.tokens : [];
+            toks.forEach(t => {
+              if (t && (t.wid!==undefined && t.wid!==null)){
+                map.set(String(t.wid), cls);
               }
-            }
-          })
-          .catch(()=>{ const wrap = document.getElementById('phraseSegments'); if (wrap) wrap.innerHTML=''; });
+            });
+          });
+          const tbody = detailsPanel.querySelector('.token-table tbody');
+          if (tbody){
+            tbody.querySelectorAll('tr').forEach(tr => {
+              const wid = tr.getAttribute('data-wid');
+              if (!wid) return;
+              const cls = map.get(wid);
+              if (!cls) return;
+              const tds = tr.querySelectorAll('td');
+              if (tds && tds.length){
+                tds[0].classList.add(cls);
+                tds[1].classList.add(cls);
+              }
+            });
+          }
+        }
+      };
+      if (Array.isArray(n.phrase_segments)){
+        applySegments(n.phrase_segments);
+      } else if (wrap) {
+        wrap.innerHTML = '';
       }
     } catch(e) { /* ignore */ }
   }
@@ -1866,9 +2060,13 @@
     try {
       const key = String(id);
       if (state.tidySegCache.has(key)) return state.tidySegCache.get(key);
-      const r = await fetchJsonCached(`/api/tf/phrases?node_id=${encodeURIComponent(id)}&level=phrase`).catch(()=>null);
-      const segs = (r && r.json && Array.isArray(r.json.segments)) ? r.json.segments : [];
-      const out = { segs };
+      const node = findNodeById(state.data, id);
+      if (node && Array.isArray(node.phrase_segments)){
+        const out = { segs: node.phrase_segments };
+        state.tidySegCache.set(key, out);
+        return out;
+      }
+      const out = { segs: [] };
       state.tidySegCache.set(key, out);
       return out;
     } catch(e){ return { segs: [] }; }

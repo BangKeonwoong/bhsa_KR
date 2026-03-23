@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import unittest
+from unittest.mock import patch
 
 from ctt_viewer import create_app
 import os
@@ -49,6 +50,29 @@ class AppRoutesTest(unittest.TestCase):
         data = rv.get_json()
         self.assertIn('has_local_bhsa', data)
         self.assertIn('has_gloss', data)
+        self.assertIn('ready', data)
+        self.assertIn('warming', data)
+        self.assertIn('phase', data)
+        self.assertIn('message', data)
+
+    def test_tree_tf_warming_returns_503(self):
+        with patch('ctt_viewer.api.has_local_bhsa_data', return_value=True), \
+             patch(
+                 'ctt_viewer.api.content_service.build_capabilities_data',
+                 return_value={
+                     'has_local_bhsa': True,
+                     'has_gloss': True,
+                     'ready': False,
+                     'warming': True,
+                     'phase': 'core',
+                     'message': '히브리 원문 feature 로딩 중',
+                 },
+             ):
+            rv = self.client.get('/api/tree?book=genesis&chapter=1&source=tf&lite=1')
+        self.assertEqual(rv.status_code, 503)
+        data = rv.get_json()
+        self.assertEqual(data.get('error'), 'tf_warming')
+        self.assertIn('tf_status', data)
 
     def test_version(self):
         rv = self.client.get('/api/version')

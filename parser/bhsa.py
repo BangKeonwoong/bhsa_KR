@@ -7,12 +7,13 @@ from __future__ import annotations
 - clause/clause_atom 기반 트리 생성(TF mother 엣지) 및 세그먼트 분해
 """
 from functools import lru_cache
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional
 import json
 import copy
 from pathlib import Path
 import os
 import re
+import threading
 
 # Lazy import to reduce startup overhead; only load Text-Fabric when needed
 Fabric = None  # type: ignore
@@ -106,13 +107,31 @@ def has_tf_gloss_feature() -> bool:
     return False
 
 
-@lru_cache(maxsize=1)
-def _load_tf():
-    """BHSA 모듈을 여러 버전 경로로 시도하여 로드.
-    우선 gloss 포함 로드를 시도하고, 실패 시 gloss 없이 로드.
-    성공 시 api 객체를 반환, 실패 시 False 반환.
-    """
-    # Start with common module paths
+TF_CORE_FEATURES = "otext otype oslots mother typ rela txt g_word_utf8"
+TF_DETAIL_FEATURES_WITH_GLOSS = (
+    "otext otype oslots mother typ rela txt g_word_utf8 gloss sp ps nu gn st vs vt "
+    "lex g_lex_utf8 function"
+)
+TF_DETAIL_FEATURES_NO_GLOSS = (
+    "otext otype oslots mother typ rela txt g_word_utf8 sp ps nu gn st vs vt "
+    "lex g_lex_utf8 function"
+)
+
+_TF_STATUS_COND = threading.Condition()
+_TF_RUNTIME_STATE = {
+    "core_api": None,
+    "detail_api": None,
+    "core_ready": False,
+    "detail_ready": False,
+    "core_loading": False,
+    "detail_loading": False,
+    "phase": "idle",
+    "last_error": None,
+}
+
+
+def _tf_module_candidates() -> tuple[list[str], list[str]]:
+    """Return `(locations, modules)` ordered to prefer the installed local BHSA."""
     module_candidates = [
         "etcbc/bhsa/tf/2021",
         "etcbc/bhsa/tf/2020",
@@ -147,14 +166,15 @@ def _load_tf():
         if m not in seen:
             merged.append(m)
             seen.add(m)
-    module_candidates = merged
-    want_with_gloss = "otext otype mother typ rela txt gloss sp ps nu gn st vs vt lex g_lex_utf8 function"
-    want_no_gloss = "otext otype mother typ rela txt sp ps nu gn st vs vt lex g_lex_utf8 function"
-    # Try loading in order
+    return locs, merged
+
+
+def _load_tf_from_candidates(feature_string: str):
+    """Try all known TF module paths and return the first API that loads."""
+    locs, module_candidates = _tf_module_candidates()
     if os.environ.get("TF_DEBUG"):
         print("[TF] locations:", locs)
         print("[TF] module candidates:", module_candidates)
-    # import Text-Fabric lazily
     global Fabric
     if Fabric is None:
         try:
@@ -163,21 +183,145 @@ def _load_tf():
         except Exception:
             return False
     for mod in module_candidates:
-        # prefer local/project locations when available
         TF = Fabric(modules=[mod], silent="deep", locations=locs or None)
-        api = TF.load(want_with_gloss)
+        api = TF.load(feature_string)
         if api:
             if os.environ.get("TF_DEBUG"):
-                print("[TF] loaded with gloss from:", mod)
-            return api
-        # 재시도: gloss 없이 로드
-        TF = Fabric(modules=[mod], silent="deep", locations=locs or None)
-        api = TF.load(want_no_gloss)
-        if api:
-            if os.environ.get("TF_DEBUG"):
-                print("[TF] loaded without gloss from:", mod)
+                print("[TF] loaded from:", mod, "features:", feature_string)
             return api
     return False
+
+
+def _phase_message(phase: str, last_error: Optional[str] = None) -> str:
+    if phase == "core":
+        return "히브리 원문 feature 로딩 중"
+    if phase == "details":
+        return "gloss/상세 데이터 준비 중"
+    if phase == "ready":
+        return "TF 데이터 준비 완료"
+    if phase == "error":
+        return last_error or "TF 데이터 준비에 실패했습니다."
+    return "TF 초기화 대기 중"
+
+
+def _load_tf_stage(stage: str):
+    """Single-flight TF loader for `core` or `details` stages."""
+    if stage not in {"core", "details"}:
+        raise ValueError(f"Unsupported TF stage: {stage}")
+
+    api_key = "detail_api" if stage == "details" else "core_api"
+    ready_key = "detail_ready" if stage == "details" else "core_ready"
+    loading_key = "detail_loading" if stage == "details" else "core_loading"
+    phase = "details" if stage == "details" else "core"
+
+    with _TF_STATUS_COND:
+        api = _TF_RUNTIME_STATE.get(api_key)
+        if _TF_RUNTIME_STATE.get(ready_key) and api:
+            return api
+        if _TF_RUNTIME_STATE.get(loading_key):
+            while _TF_RUNTIME_STATE.get(loading_key):
+                _TF_STATUS_COND.wait()
+            api = _TF_RUNTIME_STATE.get(api_key)
+            if _TF_RUNTIME_STATE.get(ready_key) and api:
+                return api
+            return False
+        _TF_RUNTIME_STATE[loading_key] = True
+        _TF_RUNTIME_STATE["last_error"] = None
+        _TF_RUNTIME_STATE["phase"] = phase
+
+    error_message = None
+    try:
+        if stage == "details":
+            api = _load_tf_from_candidates(TF_DETAIL_FEATURES_WITH_GLOSS)
+            if not api:
+                api = _load_tf_from_candidates(TF_DETAIL_FEATURES_NO_GLOSS)
+        else:
+            api = _load_tf_from_candidates(TF_CORE_FEATURES)
+        if not api:
+            error_message = "BHSA(Text-Fabric) 데이터를 불러오지 못했습니다."
+    except Exception as exc:
+        api = False
+        error_message = str(exc)
+
+    with _TF_STATUS_COND:
+        _TF_RUNTIME_STATE[loading_key] = False
+        if api:
+            _TF_RUNTIME_STATE[api_key] = api
+            _TF_RUNTIME_STATE[ready_key] = True
+            if stage == "details" and not _TF_RUNTIME_STATE.get("core_ready"):
+                _TF_RUNTIME_STATE["core_api"] = api
+                _TF_RUNTIME_STATE["core_ready"] = True
+            _TF_RUNTIME_STATE["phase"] = "ready"
+            _TF_RUNTIME_STATE["last_error"] = None
+        else:
+            _TF_RUNTIME_STATE["phase"] = "error"
+            _TF_RUNTIME_STATE["last_error"] = error_message or "TF load failed"
+        _TF_STATUS_COND.notify_all()
+        return _TF_RUNTIME_STATE.get(api_key) if api else False
+
+
+def _spawn_tf_warmup(stage: str) -> None:
+    def runner() -> None:
+        _load_tf_stage(stage)
+
+    thread = threading.Thread(target=runner, name=f"tf-{stage}-warmup", daemon=True)
+    thread.start()
+
+
+def ensure_tf_warmup(require_details: bool = False) -> None:
+    """Kick off background TF loading if it is not already ready/loading."""
+    if not has_local_bhsa_data():
+        return
+    stage = "details" if require_details else "core"
+    ready_key = "detail_ready" if require_details else "core_ready"
+    loading_key = "detail_loading" if require_details else "core_loading"
+    with _TF_STATUS_COND:
+        if _TF_RUNTIME_STATE.get(ready_key) or _TF_RUNTIME_STATE.get(loading_key):
+            return
+    _spawn_tf_warmup(stage)
+
+
+def get_tf_status(start_warmup: bool = False, require_details: bool = False) -> dict:
+    """Return current TF readiness and optionally trigger background warm-up."""
+    local_bhsa = bool(has_local_bhsa_data())
+    if start_warmup and local_bhsa:
+        ensure_tf_warmup(require_details=require_details)
+    with _TF_STATUS_COND:
+        ready = bool(_TF_RUNTIME_STATE["detail_ready"] if require_details else _TF_RUNTIME_STATE["core_ready"])
+        warming = bool(_TF_RUNTIME_STATE["detail_loading"] if require_details else (_TF_RUNTIME_STATE["core_loading"] or _TF_RUNTIME_STATE["detail_loading"]))
+        phase = str(_TF_RUNTIME_STATE.get("phase") or "idle")
+        if ready and phase not in {"details", "error"}:
+            phase = "ready"
+        elif require_details and _TF_RUNTIME_STATE["detail_loading"]:
+            phase = "details"
+        elif (not require_details) and _TF_RUNTIME_STATE["core_loading"]:
+            phase = "core"
+        last_error = _TF_RUNTIME_STATE.get("last_error")
+    if not local_bhsa:
+        phase = "idle"
+    return {
+        "has_local_bhsa": local_bhsa,
+        "has_gloss": bool(has_tf_gloss_feature()),
+        "ready": bool(ready and local_bhsa),
+        "warming": bool(warming),
+        "details_ready": bool(_TF_RUNTIME_STATE["detail_ready"] if local_bhsa else False),
+        "phase": phase,
+        "message": _phase_message(phase, last_error),
+        "last_error": last_error,
+    }
+
+
+def _load_tf_core():
+    return _load_tf_stage("core")
+
+
+def _load_tf_details():
+    return _load_tf_stage("details")
+
+
+def _load_tf():
+    """Backward-compatible alias for the full/detail TF loader."""
+    return _load_tf_details()
 
 
 def _strip_diacritics(s: str) -> str:
@@ -187,7 +331,7 @@ def _strip_diacritics(s: str) -> str:
 
 @lru_cache(maxsize=2048)
 def get_verse_tokens(book_label: str, chapter: int, verse: int) -> List[str]:
-    api = _load_tf()
+    api = _load_tf_core()
     if not api:
         return []
     F, L, T = api.F, api.L, api.T
@@ -227,7 +371,7 @@ def verse_text(book_label: str, chapter: int, verse: int) -> str:
 
 
 def verse_gloss(book_label: str, chapter: int, verse: int) -> str:
-    api = _load_tf()
+    api = _load_tf_details()
     if not api:
         return ""
     F, L, T = api.F, api.L, api.T
@@ -288,7 +432,7 @@ def parse_chapter_tf(book_label: str, chapter: int, title: str, include_details:
 
     include_details=False 일 때는 토큰/글로스/기능 라벨을 제외한 경량 트리를 반환.
     """
-    api = _load_tf()
+    api = _load_tf_details() if include_details else _load_tf_core()
     if not api:
         raise RuntimeError("BHSA API not available")
     F, L, T, E = api.F, api.L, api.T, api.E
@@ -467,7 +611,7 @@ def parse_chapter_tf_cached(book_label: str, chapter: int, title: str, include_d
 
 def node_details(node_id: int) -> Dict[str, Any]:
     """주어진 TF 노드(clause/clause_atom)의 상세(토큰/글로스/기능 등)를 반환."""
-    api = _load_tf()
+    api = _load_tf_details()
     if not api:
         return {}
     F, L, T = api.F, api.L, api.T
@@ -561,7 +705,7 @@ def typ_stats(book_label: str | None = None, max_chapters: int | None = None) ->
     - For each chapter, iterate verses until 2 consecutive gaps (same heuristic as elsewhere).
     - Counts typ on clause_atom nodes (fallback to clause if clause_atom empty).
     """
-    api = _load_tf()
+    api = _load_tf_core()
     if not api:
         return {}
     F, L, T = api.F, api.L, api.T
@@ -658,7 +802,7 @@ def get_phrase_segments(node_id: int, level: str = 'phrase') -> list[dict]:
 
     Each segment: { text, gloss_ko, function, cat, cat_ko, tokens:[{w, sp, gloss_ko}] }
     """
-    api = _load_tf()
+    api = _load_tf_details()
     if not api:
         return []
     F, L, T = api.F, api.L, api.T
