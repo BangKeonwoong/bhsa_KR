@@ -1142,29 +1142,24 @@
   function render(){ if (tidyView.classList.contains('visible')) renderTidy(); else renderList(); }
 
   // ---- Tidy helpers ----
-  /**
-   * Given a d3.hierarchy root and selected id, collect neighbor metadata:
-   * - parentId: id of direct parent (for 1.3x scale)
-   * - childIds: set of visible children ids (for 2x scale)
-   */
-  function collectNeighbors(root, selectedId){
-    let parentId = null; const childIds = new Set();
-    if (!selectedId) return { parentId, childIds };
-    let sel = null; try { root.each(n => { if (n && n.data && n.data.id === selectedId) sel = n; }); } catch(e){}
-    if (!sel) return { parentId, childIds };
-    try { if (sel.parent && sel.parent.data) parentId = sel.parent.data.id; } catch(e){}
-    try { (sel.children || []).forEach(ch => { if (ch && ch.data) childIds.add(ch.data.id); }); } catch(e){}
-    return { parentId, childIds };
+  function shouldFadeNodeBySelectionAndLegend(data, active){
+    const id = data && data.id;
+    const fadeForSelection = !!(state.selectedId && id !== state.selectedId);
+    const cat = clauseClass(data);
+    const fadeForLegend = !!(active && !active.has(cat));
+    return fadeForSelection || fadeForLegend;
   }
 
-  /** Apply legend-based fading on nodes and links based on activeCats. */
-  function legendFilter(node, linkLayer){
+  /** Apply selection- and legend-based fading on nodes and links. */
+  function applyNodeFading(node, linkLayer){
     const active = (state.activeCats && state.activeCats.size) ? new Set(state.activeCats) : null;
-    if (!active) return;
-    const include = new Set();
-    try { node.each(function(d){ const cat = clauseClass(d.data); if (active.has(cat)) include.add(d.data.id); }); } catch(e){}
-    try { node.classed('faded', function(d){ return !include.has(d.data.id); }); } catch(e){}
-    try { linkLayer.classed('faded', function(d){ return !(include.has(d.source.data.id) && include.has(d.target.data.id)); }); } catch(e){}
+    try { node.classed('faded', function(d){ return shouldFadeNodeBySelectionAndLegend(d && d.data, active); }); } catch(e){}
+    try {
+      linkLayer.classed('faded', function(d){
+        return shouldFadeNodeBySelectionAndLegend(d && d.source && d.source.data, active)
+          || shouldFadeNodeBySelectionAndLegend(d && d.target && d.target.data, active);
+      });
+    } catch(e){}
   }
 
   /**
@@ -1258,7 +1253,6 @@
     state.activeCats = (state.activeOnly && state.highlightCats && state.highlightCats.size) ? new Set(state.highlightCats) : null;
     const data = deepClone(state.data); applyCollapsed(data);
     const root = d3.hierarchy(data);
-    const neighbors = collectNeighbors(root, state.selectedId);
     // Spacing controlled by slider
     const baseSpacing = state.spacing || 280;
     const dy = baseSpacing; // depth spacing (left-right when horizontal, top-bottom when vertical)
@@ -1317,29 +1311,13 @@
     const node=g.append('g').selectAll('g').data(root.descendants()).join('g').attr('class','tree-node')
       .attr('data-verse-num', d => { try { const m = String(d && d.data && d.data.verse || '').match(/^[0-9A-Z]{3}\s+\d{2},(\d{2})/); return m ? String(parseInt(m[1],10)||'') : ''; } catch(e){ return ''; } })
       .attr('data-has-ctype', d => (d && d.data && d.data.ctype) ? '1' : '')
-      .attr('transform', d=> {
-        const pos = (state.orientation==='horizontal'? `translate(${d.y},${d.x})`: `translate(${d.x},${d.y})`);
-        const id = d && d.data ? d.data.id : undefined;
-        const isSel = !!(state.selectedId && id===state.selectedId);
-        const isParent = !!(state.selectedId && neighbors && neighbors.parentId!==null && id===neighbors.parentId);
-        const isChild = !!(state.selectedId && neighbors && neighbors.childIds && neighbors.childIds.has(id));
-        const s = isSel ? 3 : (isParent ? 1.3 : ( isChild ? 2 : 1));
-        return s !== 1 ? `${pos} scale(${s})` : pos;
-      })
+      .attr('transform', d=> state.orientation==='horizontal' ? `translate(${d.y},${d.x})` : `translate(${d.x},${d.y})`)
       .classed('selected', d => !!(state.selectedId && d && d.data && d.data.id===state.selectedId))
-      .classed('neighbor-parent', d => {
-        const id = d && d.data ? d.data.id : undefined;
-        return !!(state.selectedId && neighbors && neighbors.parentId!==null && id===neighbors.parentId);
-      })
-      .classed('neighbor-child', d => {
-        const id = d && d.data ? d.data.id : undefined;
-        return !!(state.selectedId && neighbors && neighbors.childIds && neighbors.childIds.has(id));
-      })
       .on('click', (ev, d)=> { if (state.showDetails) { ev.stopPropagation(); showDetails(d.data); } else { toggleNode(d.data); } })
       .on('mouseenter', (ev, d)=>{ try { const v = verseNumFromNode(d && d.data); if (v) setActiveVerseInPanel(v, false); } catch(e){} })
       .on('mouseleave', ()=>{ try { clearActiveVerseInPanel(); } catch(e){} });
-    // Apply legend filtering (fade non-selected)
-    legendFilter(node, linkLayer);
+    // Apply selection and legend-based fading
+    applyNodeFading(node, linkLayer);
     const textSel = addTextAndRects(node, labelTextForNode);
 
     // Edge labels (rela) after nodes for visibility and collision-aware placement
@@ -1448,19 +1426,8 @@
     listContainer.innerHTML=''; if(!state.data) return;
     const ul=document.createElement('ul'); ul.className='indented'; listContainer.appendChild(ul);
     const data=deepClone(state.data); applyCollapsed(data);
-    const neighborsList = (function collectNeighbors(rootObj, selId){
-      let parentId = null; const childIds = new Set(); if (!selId || !rootObj) return { parentId, childIds };
-      let selNode = null;
-      walk(rootObj, (n)=>{
-        const kids = (n.children||[]);
-        for (const k of kids){ if (k && k.id !== undefined){ if (k.id === selId) parentId = n.id; } }
-        if (n && n.id === selId) selNode = n;
-      });
-      if (selNode && Array.isArray(selNode.children)) selNode.children.forEach(k=>{ if (k && k.id!==undefined) childIds.add(k.id); });
-      return { parentId, childIds };
-    })(data, state.selectedId);
-    data.children.forEach(ch=> ul.appendChild(renderItem(ch,0, neighborsList)));
-    // Apply highlight and fading based on legend selections
+    data.children.forEach(ch=> ul.appendChild(renderItem(ch,0)));
+    // Apply highlight and fading based on legend selections and selection state
     const active = (state.activeOnly && state.highlightCats && state.highlightCats.size)
       ? new Set(state.highlightCats)
       : null;
@@ -1470,22 +1437,20 @@
       let cat = null;
       li.className.split(/\s+/).forEach(c => { if (c.startsWith('cat-')) cat = c; });
       if (cat && state.highlightCats && state.highlightCats.has(cat)) li.classList.add('hl'); else li.classList.remove('hl');
-      if (active){
-        if (!cat || !active.has(cat)) li.classList.add('faded'); else li.classList.remove('faded');
-      } else {
-        li.classList.remove('faded');
-      }
+      const nodeId = li.getAttribute('data-node-id');
+      const fadeForSelection = !!(state.selectedId && nodeId !== String(state.selectedId));
+      const fadeForLegend = !!(active && (!cat || !active.has(cat)));
+      li.classList.toggle('faded', fadeForSelection || fadeForLegend);
     });
   }
 
-  function renderItem(node, level, neighborsList){
+  function renderItem(node, level){
     const li=document.createElement('li'); li.className='node-item ' + clauseClass(node);
+    try { if (node && node.id !== undefined && node.id !== null) li.setAttribute('data-node-id', String(node.id)); } catch(e){}
     // annotate list items for cross-view hover/highlight
     try { const vnum = verseNumFromNode(node); if (vnum) li.setAttribute('data-verse-num', String(vnum)); } catch(e){}
     try { li.setAttribute('data-has-ctype', isClauseNode(node) ? '1' : ''); } catch(e){}
     if (state.selectedId && node && node.id===state.selectedId) li.classList.add('selected');
-    if (neighborsList && neighborsList.parentId!==null && node && node.id===neighborsList.parentId) li.classList.add('neighbor-parent');
-    if (neighborsList && neighborsList.childIds && neighborsList.childIds.has && neighborsList.childIds.has(node.id)) li.classList.add('neighbor-child');
     // quote highlight (CTT qBlockId/qDepth preferred)
     const depthClass = node.qDepth ? ` depth-${Math.min(4, node.qDepth)}` : '';
     if ((node.qBlockId && node.qBlockId>0) || node.text_type==='Q') li.className += ' q-row'+depthClass;
@@ -1507,7 +1472,7 @@
     t.textContent = meta + content;
     line.appendChild(tog); line.appendChild(t); li.appendChild(line);
     if (state.showDetails){ t.style.cursor='pointer'; t.addEventListener('click', ()=> showDetails(node)); }
-    if(node.children&&node.children.length){ const ul=document.createElement('ul'); ul.className='indented'; if(!isCollapsed(node)) node.children.forEach(c=> ul.appendChild(renderItem(c,level+1, neighborsList))); li.appendChild(ul);} return li;
+    if(node.children&&node.children.length){ const ul=document.createElement('ul'); ul.className='indented'; if(!isCollapsed(node)) node.children.forEach(c=> ul.appendChild(renderItem(c,level+1))); li.appendChild(ul);} return li;
   }
 
   function ensureListSelectionIntoView(){
@@ -1776,6 +1741,7 @@
     const tokens = Array.isArray(n.tokens) ? n.tokens : [];
     const rows = tokens.map(t => {
       const sp = valueKo('sp', t.sp), ps = valueKo('ps', t.ps), nu=valueKo('nu', t.nu), gn=valueKo('gn', t.gn), st=valueKo('st', t.st), vs=norm(t.vs), vt=norm(t.vt);
+      const lemma = escapeHtml(norm(t.lemma));
       const glossRaw = norm(t.gloss);
       const gloss = escapeHtml(splitGloss(glossRaw).join(' | ') || glossRaw);
       const glossKoRaw = norm(t.gloss_ko);
@@ -1783,7 +1749,7 @@
       const glossKo = escapeHtml((glossKoRaw || '').replaceAll('/', ';'));
       const w = safe(t.w);
       const wid = (t && (t.wid || t.id)) ? String(t.wid || t.id) : '';
-      return `<tr data-wid="${wid}"><td class="token-he">${w}</td><td class="tok-gloss">${gloss}</td><td>${glossKo}</td><td class="mono">${sp}</td><td class="mono">${ps}</td><td class="mono">${nu}</td><td class="mono">${gn}</td><td class="mono">${st}</td><td class="mono">${vs}</td><td class="mono">${vt}</td></tr>`;
+      return `<tr data-wid="${wid}"><td class="token-he">${w}</td><td class="token-lemma">${lemma}</td><td class="tok-gloss">${gloss}</td><td>${glossKo}</td><td class="mono">${sp}</td><td class="mono">${ps}</td><td class="mono">${nu}</td><td class="mono">${gn}</td><td class="mono">${st}</td><td class="mono">${vs}</td><td class="mono">${vt}</td></tr>`;
     }).join('');
     const koLine = n.gloss_ko ? `<div class="kv"><b>해석(한)</b>: ${escapeHtml(n.gloss_ko)}</div>` : '';
     // KNT 절 텍스트 자리 표시자 (해석(한) 아래)
@@ -1800,7 +1766,7 @@
     const table = `
       <div class="section-title">토큰 상세</div>
       <table class="token-table">
-        <thead><tr><th>형태(히브리)</th><th>해석(영)</th><th>해석(한)</th><th>품사</th><th>인칭</th><th>수</th><th>성</th><th>상태</th><th>동사 어간</th><th>동사형</th></tr></thead>
+        <thead><tr><th>형태(히브리)</th><th>원형</th><th>해석(영)</th><th>해석(한)</th><th>품사</th><th>인칭</th><th>수</th><th>성</th><th>상태</th><th>동사 어간</th><th>동사형</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     `;

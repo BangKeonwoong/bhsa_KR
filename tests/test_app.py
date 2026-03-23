@@ -134,6 +134,7 @@ class AppRoutesTest(unittest.TestCase):
         self.assertEqual(rv.status_code, 200)
         text = rv.get_data(as_text=True)
         self.assertIn('openapi: 3.0', text)
+        self.assertIn('lemma:', text)
 
     def test_api_docs(self):
         rv = self.client.get('/api/docs')

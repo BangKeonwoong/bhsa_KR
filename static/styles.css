@@ -131,8 +131,8 @@ main {
 .token .morph { color: #666; font-size: 12px; margin-left: 2px; }
 .lb { display: inline-block; background: #fff; border: 1px solid #d1d5db; border-radius: 6px; padding: 4px 6px; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
 .tree-link { fill: none; stroke: var(--tree-link, #aaa); stroke-width: 1.2px; }
-.tree-node.faded { opacity: 0.25; }
-.tree-link.faded { opacity: 0.15; }
+.tree-node.faded { opacity: 0.22; }
+.tree-link.faded { opacity: 0.12; }
 
 /* 텍스트 타입 색상 매핑 */
 .node-N circle { fill: #3b82f6; }
@@ -203,9 +203,7 @@ li.node-item { padding: 4px 6px; border-radius: 6px; }
 li.node-item.selected > .node-line > .name { font-size: 3em; line-height: 1.1; }
 /* Neighbor styles: parent slightly larger, children larger */
 /* 리스트뷰는 선택된 항목만 크기 변화 적용 */
-/* li.node-item.neighbor-parent .name { font-size: 1.3em; line-height: 1.15; } */
-/* li.node-item.neighbor-child .name { font-size: 2em; line-height: 1.1; } */
-li.node-item.faded { opacity: 0.35; }
+li.node-item.faded { opacity: 0.28; }
 li.node-item.hl { border-left-width: 5px !important; }
 li.node-item:hover { background: var(--list-hover-bg, #f7f7f7); }
 /* 리스트에서도 좌측 보더로 유형을 표시 */
@@ -373,6 +371,7 @@ li.node-item.hover-hi { background: var(--color-hover-bg); border-color: var(--c
 
 /* Token table highlight rolled back: chips only */
 /* Token table highlight: match chip colors on 형태/해석(영) 셀 */
+.token-table td.token-lemma { font-family: 'Accordance', 'SBL Hebrew', 'Ezra SIL', 'Noto Sans Hebrew', system-ui, sans-serif; direction: rtl; unicode-bidi: isolate-override; }
 .token-table td.ph-prep { background: #E3F2FD; color: #0D47A1; }
 .token-table td.ph-conj { background: #FFF3E0; color: #E65100; }
 .token-table td.ph-subj { background: #E8F5E9; color: #1B5E20; }

@@ -329,6 +329,76 @@ def _strip_diacritics(s: str) -> str:
     return re.sub(r"[\u0591-\u05BD\u05BF-\u05C7]", "", s)
 
 
+def _word_surface(F, T, w: int) -> str:
+    if hasattr(F, 'g_word_utf8'):
+        val = F.g_word_utf8.v(w)
+    else:
+        try:
+            val = T.text(w, fmt='text-orig-full')
+        except Exception:
+            val = T.text(w)
+    return val or ""
+
+
+def _word_lemma(F, L, w: int) -> str:
+    lemma = ""
+    if hasattr(F, 'g_lex_utf8'):
+        try:
+            lemma = F.g_lex_utf8.v(w) or ""
+        except Exception:
+            lemma = ""
+    if lemma:
+        return lemma
+    if hasattr(L, 'u'):
+        try:
+            lex = (L.u(w, otype='lex') or [None])[0]
+        except Exception:
+            lex = None
+        if lex:
+            if hasattr(F, 'g_lex_utf8'):
+                try:
+                    lemma = F.g_lex_utf8.v(lex) or ""
+                except Exception:
+                    lemma = ""
+            if not lemma and hasattr(F, 'lex'):
+                try:
+                    lemma = F.lex.v(lex) or ""
+                except Exception:
+                    lemma = ""
+    return lemma
+
+
+def _build_word_token(F, L, T, w: int, include_morph: bool = True) -> tuple[str, dict, str]:
+    val = _word_surface(F, T, w)
+    token: Dict[str, Any] = {"w": val, "wid": w}
+    lemma = _word_lemma(F, L, w)
+    if lemma:
+        token["lemma"] = lemma
+    g = ''
+    if hasattr(F, 'gloss'):
+        try:
+            g = F.gloss.v(w) or ''
+        except Exception:
+            g = ''
+        if not g and hasattr(L, 'u'):
+            try:
+                lex = (L.u(w, otype='lex') or [None])[0]
+                if lex:
+                    g = F.gloss.v(lex) or ''
+            except Exception:
+                g = ''
+    gko = gloss_ko_from_english(g) if g else ''
+    if include_morph:
+        for feat in ("sp", "ps", "nu", "gn", "st", "vs", "vt"):
+            if hasattr(F, feat):
+                token[feat] = getattr(F, feat).v(w) or ""
+    if g:
+        token["gloss"] = g
+    if gko:
+        token["gloss_ko"] = gko
+    return val, token, gko
+
+
 @lru_cache(maxsize=2048)
 def get_verse_tokens(book_label: str, chapter: int, verse: int) -> List[str]:
     api = _load_tf_core()
@@ -487,42 +557,14 @@ def parse_chapter_tf(book_label: str, chapter: int, title: str, include_details:
         gloss_ko_parts: List[str] = []  # 한글 gloss summary
         token_list: List[Dict[str, Any]] = []
         for w in words:
-            if hasattr(F, 'g_word_utf8'):
-                val = F.g_word_utf8.v(w)
-            else:
-                try:
-                    val = T.text(w, fmt='text-orig-full')
-                except Exception:
-                    val = T.text(w)
+            val, token, gko = _build_word_token(F, L, T, w)
             parts.append(val)
-            # 영어 gloss 및 한글 gloss 요약(가능할 때만)
-            g = ''
-            if hasattr(F, 'gloss'):
-                try:
-                    g = F.gloss.v(w) or ''
-                except Exception:
-                    g = ''
-                if not g:
-                    try:
-                        lex = (L.u(w, otype='lex') or [None])[0]
-                        if lex:
-                            g = F.gloss.v(lex) or ''
-                    except Exception:
-                        g = ''
+            g = token.get("gloss", "")
             if g:
                 gloss_parts.append(g)
-                gko = gloss_ko_from_english(g)
                 if gko:
                     gloss_ko_parts.append(gko)
             if include_details:
-                token = {"w": val, "wid": w}
-                if g:
-                    token["gloss"] = g
-                if gko:
-                    token["gloss_ko"] = gko
-                for feat in ("sp","ps","nu","gn","st","vs","vt"):
-                    if hasattr(F, feat):
-                        token[feat] = getattr(F, feat).v(w) or ""
                 token_list.append(token)
         if include_details and hasattr(F, 'function'):
             func_set = set()
@@ -632,36 +674,8 @@ def node_details(node_id: int) -> Dict[str, Any]:
     gloss_parts: List[str] = []
     token_list: List[Dict[str, Any]] = []
     for w in words:
-        if hasattr(F, 'g_word_utf8'):
-            val = F.g_word_utf8.v(w)
-        else:
-            try:
-                val = T.text(w, fmt='text-orig-full')
-            except Exception:
-                val = T.text(w)
+        val, tok, _gko = _build_word_token(F, L, T, w)
         parts.append(val)
-        g = ''
-        if hasattr(F, 'gloss'):
-            try:
-                g = F.gloss.v(w) or ''
-            except Exception:
-                g = ''
-        if not g and hasattr(L, 'u') and hasattr(F, 'gloss'):
-            try:
-                lex = (L.u(w, otype='lex') or [None])[0]
-                if lex:
-                    g = F.gloss.v(lex) or ''
-            except Exception:
-                g = ''
-        gko = gloss_ko_from_english(g) if g else ''
-        tok: Dict[str, Any] = {"w": val, "wid": w}
-        for feat in ('sp','ps','nu','gn','st','vs','vt'):
-            if hasattr(F, feat):
-                tok[feat] = getattr(F, feat).v(w) or ''
-        if g:
-            tok['gloss'] = g
-        if gko:
-            tok['gloss_ko'] = gko
         token_list.append(tok)
     # 기능, 관계, 텍스트 유형
     func_set = set()
@@ -850,32 +864,10 @@ def get_phrase_segments(node_id: int, level: str = 'phrase') -> list[dict]:
         parts: list[str] = []
         gko_parts: list[str] = []
         for w in words:
-            if hasattr(F, 'g_word_utf8'):
-                wtxt = F.g_word_utf8.v(w)
-            else:
-                try:
-                    wtxt = T.text(w, fmt='text-orig-full')
-                except Exception:
-                    wtxt = T.text(w)
+            wtxt, tok, gko = _build_word_token(F, L, T, w)
             parts.append(wtxt)
-            # gloss ko
-            g = ''
-            if hasattr(F, 'gloss'):
-                try:
-                    g = F.gloss.v(w) or ''
-                except Exception:
-                    g = ''
-            gko = gloss_ko_from_english(g) if g else ''
             if gko:
                 gko_parts.append(gko)
-            tok = { 'w': wtxt, 'wid': w }
-            for feat in ('sp','ps','nu','gn','st','vs','vt'):
-                if hasattr(F, feat):
-                    tok[feat] = getattr(F, feat).v(w) or ''
-            if g:
-                tok['gloss'] = g
-            if gko:
-                tok['gloss_ko'] = gko
             tokens.append(tok)
         func = ''
         if hasattr(F, 'function'):

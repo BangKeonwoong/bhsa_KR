@@ -52,6 +52,13 @@ class ContentServiceTest(unittest.TestCase):
         self.assertIsNone(_find_first_tokenized(lite_tree))
         self.assertIsNotNone(_find_first_tokenized(full_tree))
 
+    def test_build_tree_data_tf_full_tokens_include_lemma_field(self):
+        tree = build_tree_data("genesis", 1, "tf", False)
+        tokenized = _find_first_tokenized(tree)
+        self.assertIsNotNone(tokenized)
+        token = tokenized["tokens"][0]
+        self.assertIn("lemma", token)
+
     def test_build_version_chapter_data_knt(self):
         chapter = build_version_chapter_data("knt", "genesis", 1)
         self.assertIsNotNone(chapter)

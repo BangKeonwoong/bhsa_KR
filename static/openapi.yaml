@@ -259,6 +259,7 @@ components:
       properties:
         w: { type: string, description: 표면형 }
         wid: { type: integer, nullable: true }
+        lemma: { type: string, nullable: true, description: 히브리어 원형(lemma) }
         gloss: { type: string, nullable: true }
         gloss_ko: { type: string, nullable: true }
         sp: { type: string, nullable: true }
