@@ -28,6 +28,7 @@ STATIC_FILES = [
     "data-client.js",
     "api-docs.html",
     "openapi.yaml",
+    "literal-index.json",
 ]
 
 

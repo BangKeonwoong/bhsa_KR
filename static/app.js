@@ -9,11 +9,14 @@
     baseTranslate: { x: 40, y: 0 },
     highlightCats: new Set(),
     selectedId: null,
+    selectedVerse: null,
     anchorMode: 'center',
     fitDoneFor: new Set(),
     lastHoverVerse: null,
     runtime: { mode: 'server', manifest: null },
     versionChapterCache: new Map(),
+    literalIndex: null,
+    literalIndexPromise: null,
   };
   const elBook = document.getElementById('book');
   const elChapter = document.getElementById('chapter');
@@ -54,6 +57,9 @@
   const toastEl = document.getElementById('toast');
   const themeSelect = document.getElementById('themeSelect');
   const dataClient = window.CTTDataClient || null;
+  const LITERAL_BOOK_OVERRIDES = {
+    'song of songs': 'Song_of_songs',
+  };
 
   // --- Local storage helpers ---
   const LS_PREFIX = 'cttViewer:';
@@ -850,7 +856,7 @@
     let found = null;
     (function walk(node){
       if (!node || found) return;
-      if (node.id === targetId) { found = node; return; }
+      if (String(node.id) === String(targetId)) { found = node; return; }
       const kids = node.children || [];
       for (const child of kids) walk(child);
     })(root);
@@ -899,10 +905,6 @@
   function _unhoverNodes(nodes){
     nodes.forEach(el => {
       try {
-        const base = el.getAttribute('data-tf-base');
-        if (base) el.setAttribute('transform', base);
-        el.removeAttribute('data-tf-base');
-        el.classList.remove('hover-bumped');
         el.classList.remove('hover-hi');
       } catch(e){}
     });
@@ -919,26 +921,13 @@
     if (state.lastHoverVerse){ unhoverVerse(state.lastHoverVerse); state.lastHoverVerse = null; }
     // Best-effort cleanup in case of re-renders
     try {
-      tidyContainer.querySelectorAll('g.tree-node.hover-bumped, g.tree-node.hover-hi').forEach(el => {
-        const base = el.getAttribute('data-tf-base'); if (base) el.setAttribute('transform', base);
-        el.removeAttribute('data-tf-base'); el.classList.remove('hover-bumped'); el.classList.remove('hover-hi');
+      tidyContainer.querySelectorAll('g.tree-node.hover-hi').forEach(el => {
+        el.classList.remove('hover-hi');
       });
       listContainer.querySelectorAll('li.node-item.hover-hi').forEach(el => el.classList.remove('hover-hi'));
     } catch(e){}
   }
-  function bumpScale(el, mul){
-    try{
-      let base = el.getAttribute('data-tf-base');
-      if (!base){ base = el.getAttribute('transform') || ''; el.setAttribute('data-tf-base', base); }
-      const m = base.match(/translate\(([^)]*)\)\s*(?:scale\(([^)]*)\))?/);
-      const pos = m ? m[1] : '0,0';
-      const s0 = m && m[2] ? parseFloat(m[2]) : 1;
-      const s1 = isFinite(s0) ? s0 * mul : mul;
-      el.setAttribute('transform', `translate(${pos}) scale(${s1})`);
-      el.classList.add('hover-bumped');
-    } catch(e){}
-  }
-  /** Apply hover highlight for a verse (tree scale + highlight, list highlight). */
+  /** Apply hover highlight for a verse (tree/list highlight only). */
   function setVerseHover(vnum){
     if (!tidyContainer) return;
     try { vnum = parseInt(vnum, 10) || 0; } catch(e){ vnum = 0; }
@@ -946,12 +935,25 @@
     if (state.lastHoverVerse === vnum) return;
     if (state.lastHoverVerse){ unhoverVerse(state.lastHoverVerse); }
     const nodes = _treeClauseNodesByVerse(vnum);
-    nodes.forEach(el => { bumpScale(el, 1.25); try { el.classList.add('hover-hi'); } catch(e){} });
+    nodes.forEach(el => { try { el.classList.add('hover-hi'); } catch(e){} });
     try { _listClauseItemsByVerse(vnum).forEach(el => el.classList.add('hover-hi')); } catch(e){}
     state.lastHoverVerse = vnum;
   }
   function applyVerseHover(vnum){
     setVerseHover(vnum);
+    setActiveVerseInPanel(vnum, false);
+  }
+  function syncSelectedVerseInPanel(doScroll){
+    try {
+      if (!versionContent) return;
+      versionContent.querySelectorAll('.verse-item.selected').forEach(el => el.classList.remove('selected'));
+      const vnum = parseInt(state.selectedVerse || '0', 10) || 0;
+      if (!vnum) return;
+      const el = versionContent.querySelector(`.verse-item[data-verse="${vnum}"]`);
+      if (!el) return;
+      el.classList.add('selected');
+      if (doScroll){ try { el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch(e){} }
+    } catch(e){}
   }
   /** Build unified versions API URL for fetch. */
   function versionsApiUrl(version, book, chapter){
@@ -1012,7 +1014,7 @@
         const num = parseInt(el.getAttribute('data-verse')||'0',10)||0;
         if (num>0) applyVerseHover(num);
       });
-      el.addEventListener('mouseleave', () => { clearVerseHover(); });
+      el.addEventListener('mouseleave', () => { clearVerseHover(); clearActiveVerseInPanel(); });
       el.addEventListener('click', () => {
         const num = parseInt(el.getAttribute('data-verse')||'0',10)||0;
         if (num>0) selectFirstClauseForVerse(num);
@@ -1025,6 +1027,8 @@
         }
       });
     });
+    syncSelectedVerseInPanel(false);
+    if (state.lastHoverVerse) setActiveVerseInPanel(state.lastHoverVerse, false);
   }
 
   function ensureDetailsVisible(){
@@ -1037,9 +1041,22 @@
     } catch(e){}
   }
   // --- Verse utils ---
+  /** Parse verse metadata from a BHSA-like ref string e.g. "GEN 01,03". */
+  function parseVerseRef(vs){
+    try {
+      const m = /\b([0-9A-Z]{3})\s+(\d{2}),(\d{2})/.exec(String(vs||''));
+      if (!m) return null;
+      return {
+        bookCode: m[1],
+        chapter: parseInt(m[2], 10) || null,
+        verse: parseInt(m[3], 10) || null,
+      };
+    } catch(e){ return null; }
+  }
   /** Parse verse number (int) from a BHSA-like ref string e.g. "GEN 01,03". */
   function verseNumFromRef(vs){
-    try{ const m = /\b([0-9A-Z]{3})\s+(\d{2}),(\d{2})/.exec(String(vs||'')); return m ? (parseInt(m[3],10)||null) : null; } catch(e){ return null; }
+    const ref = parseVerseRef(vs);
+    return ref ? ref.verse : null;
   }
   /** Convenience wrapper: parse verse number from a node object. */
   function verseNumFromNode(n){ return verseNumFromRef(n && n.verse); }
@@ -1059,33 +1076,163 @@
     } catch(e){}
     return found;
   }
+  function currentLiteralBookKey(){
+    try {
+      const label = String(bookLabelName(elBook && elBook.value) || '').trim();
+      if (!label) return '';
+      const aliases = (state.literalIndex && state.literalIndex.aliases) || {};
+      const canonicalLabel = LITERAL_BOOK_OVERRIDES[label.toLowerCase()] || label;
+      return (
+        aliases[label.toLowerCase()] ||
+        aliases[label.replace(/\s+/g, '_').toLowerCase()] ||
+        aliases[canonicalLabel.toLowerCase()] ||
+        aliases[canonicalLabel.replace(/\s+/g, '_').toLowerCase()] ||
+        canonicalLabel
+      );
+    } catch(e){ return ''; }
+  }
+  async function loadLiteralIndex(){
+    if (state.literalIndex) return state.literalIndex;
+    if (state.literalIndexPromise) return state.literalIndexPromise;
+    const url = new URL('./literal-index.json', document.baseURI).toString();
+    state.literalIndexPromise = fetchJsonCached(url)
+      .then(r => {
+        state.literalIndex = (r && r.json && typeof r.json === 'object') ? r.json : {};
+        return state.literalIndex;
+      })
+      .catch(() => {
+        state.literalIndex = {};
+        return state.literalIndex;
+      })
+      .finally(() => { state.literalIndexPromise = null; });
+    return state.literalIndexPromise;
+  }
+  function normalizeLiteralType(value){
+    return String(value || '')
+      .toLowerCase()
+      .replace(/\s+/g, '')
+      .replace(/[^a-z0-9]/g, '');
+  }
+  function getNodePathById(root, targetId){
+    const path = [];
+    let done = false;
+    (function dfs(node){
+      if (!node || done) return;
+      path.push(node);
+      if (String(node.id) === String(targetId)){ done = true; return; }
+      const kids = (node.children || []).concat(node._children || []);
+      for (const child of kids){
+        dfs(child);
+        if (done) return;
+      }
+      path.pop();
+    })(root);
+    return done ? path.slice() : [];
+  }
+  function getMotherClauseTypeForNode(node){
+    if (!node || node.id === undefined || node.id === null || !state || !state.data) return '';
+    const path = getNodePathById(state.data, node.id);
+    for (let i = path.length - 2; i >= 0; i -= 1){
+      const candidate = path[i];
+      if (candidate && candidate.ctype) return String(candidate.ctype);
+    }
+    return '';
+  }
+  function getLiteralVerseEntries(node){
+    try {
+      const literalIndex = (state.literalIndex && state.literalIndex.books) || {};
+      const ref = parseVerseRef(node && node.verse);
+      const bookKey = currentLiteralBookKey();
+      if (!ref || !ref.chapter || !ref.verse || !bookKey) return [];
+      const byBook = literalIndex[bookKey];
+      const byChapter = byBook && byBook[String(ref.chapter)];
+      const byVerse = byChapter && byChapter[String(ref.verse)];
+      return Array.isArray(byVerse) ? byVerse : [];
+    } catch(e){ return []; }
+  }
+  function resolveLiteralEntriesForNode(node){
+    const entries = getLiteralVerseEntries(node);
+    if (!entries.length) return [];
+    const clauseType = normalizeLiteralType(node && node.ctype);
+    const motherClauseType = normalizeLiteralType(getMotherClauseTypeForNode(node));
+    if (clauseType){
+      const exact = entries.filter(entry =>
+        normalizeLiteralType(entry && entry.clauseType) === clauseType &&
+        (!motherClauseType || normalizeLiteralType(entry && entry.motherClauseType) === motherClauseType)
+      );
+      if (exact.length) return exact;
+      const clauseOnly = entries.filter(entry => normalizeLiteralType(entry && entry.clauseType) === clauseType);
+      if (clauseOnly.length) return clauseOnly;
+    }
+    return entries;
+  }
+  function renderLiteralEntries(entries){
+    if (!Array.isArray(entries) || !entries.length) return '';
+    const lines = entries
+      .map(entry => String(entry && entry.koreanLiteral || '').trim())
+      .filter(Boolean);
+    if (!lines.length) return '';
+    if (lines.length === 1){
+      return `<b>직역</b>: ${escapeHtml(lines[0])}`;
+    }
+    return `<b>직역</b>: ${lines.map(line => `<span class="literal-entry">${escapeHtml(line)}</span>`).join('<br>')}`;
+  }
+  function setSelectedNodeState(node){
+    const selectedId = node && node.id !== undefined && node.id !== null ? node.id : null;
+    state.selectedId = selectedId;
+    state.selectedVerse = selectedId !== null ? (verseNumFromNode(node) || null) : null;
+  }
+  function clearNodeSelection(){
+    state.selectedId = null;
+    state.selectedVerse = null;
+    try { render(); } catch(e){}
+    try { syncSelectedVerseInPanel(false); } catch(e){}
+    try { ensureListSelectionIntoView(); } catch(e){}
+  }
+  function applyNodeSelection(node, opts){
+    if (!node || node.id === undefined || node.id === null) return false;
+    const options = opts || {};
+    setSelectedNodeState(node);
+    try { render(); } catch(e){}
+    try { syncSelectedVerseInPanel(!!options.scrollVerse); } catch(e){}
+    try { ensureListSelectionIntoView(); } catch(e){}
+    if (options.showDetails !== false) {
+      try { showDetails(node); } catch(e){}
+    }
+    if (options.center) {
+      requestAnimationFrame(() => { try { centerOnNodeId(node.id); } catch(e){} });
+    }
+    return true;
+  }
+  function toggleNodeSelection(node, opts){
+    if (!node || node.id === undefined || node.id === null) return false;
+    if (state.selectedId !== null && String(state.selectedId) === String(node.id)){
+      clearNodeSelection();
+      return false;
+    }
+    return applyNodeSelection(node, opts);
+  }
   function selectFirstClauseForVerse(vnum){
     ensureDetailsVisible();
     const node = findFirstClauseNodeForVerse(vnum);
     if (!node){ showToast('해당 절의 절/절요소를 찾지 못했습니다', 'warn'); return; }
     try { ensurePathExpandedTo(node.id); } catch(e){}
-    try {
-      state.selectedId = node.id;
-      render();
-      showDetails(node);
-      // center view on the chosen node after DOM paints
-      requestAnimationFrame(() => { try { centerOnNodeId(node.id); } catch(e){} });
-    } catch(e){}
+    toggleNodeSelection(node, { center: true, scrollVerse: true, showDetails: true });
   }
 
   function setActiveVerseInPanel(vnum, doScroll){
     try {
       if (!versionsPanel || !versionsPanel.classList.contains('visible') || !versionContent) return;
-      versionContent.querySelectorAll('.verse-item.active').forEach(el => el.classList.remove('active'));
+      versionContent.querySelectorAll('.verse-item.hover').forEach(el => el.classList.remove('hover'));
       const el = versionContent.querySelector(`.verse-item[data-verse="${vnum}"]`);
       if (el){
-        el.classList.add('active');
+        el.classList.add('hover');
         if (doScroll){ try { el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch(e){} }
       }
     } catch(e){}
   }
   function clearActiveVerseInPanel(){
-    try { if (!versionContent) return; versionContent.querySelectorAll('.verse-item.active').forEach(el => el.classList.remove('active')); } catch(e){}
+    try { if (!versionContent) return; versionContent.querySelectorAll('.verse-item.hover').forEach(el => el.classList.remove('hover')); } catch(e){}
   }
 
   // --- Details resizer (drag to set height) ---
@@ -1144,9 +1291,40 @@
   // ---- Tidy helpers ----
   function shouldFadeNodeBySelectionAndLegend(data, active){
     const id = data && data.id;
-    const fadeForSelection = !!(state.selectedId && id !== state.selectedId);
+    const verse = verseNumFromNode(data);
+    const keepForSelection = !!(
+      state.selectedId &&
+      (
+        String(id) === String(state.selectedId) ||
+        (state.lastHoverVerse && verse === state.lastHoverVerse)
+      )
+    );
+    const fadeForSelection = !!(state.selectedId && !keepForSelection);
     const cat = clauseClass(data);
     const fadeForLegend = !!(active && !active.has(cat));
+    return fadeForSelection || fadeForLegend;
+  }
+  function shouldFadeLinkBySelectionAndLegend(link, active){
+    const sourceData = link && link.source && link.source.data;
+    const targetData = link && link.target && link.target.data;
+    const sourceVisible = sourceData && !(
+      state.selectedId &&
+      !(
+        String(sourceData.id) === String(state.selectedId) ||
+        (state.lastHoverVerse && verseNumFromNode(sourceData) === state.lastHoverVerse)
+      )
+    );
+    const targetVisible = targetData && !(
+      state.selectedId &&
+      !(
+        String(targetData.id) === String(state.selectedId) ||
+        (state.lastHoverVerse && verseNumFromNode(targetData) === state.lastHoverVerse)
+      )
+    );
+    const fadeForSelection = !!(state.selectedId && !(sourceVisible || targetVisible));
+    const sourceLegend = !!(active && !active.has(clauseClass(sourceData)));
+    const targetLegend = !!(active && !active.has(clauseClass(targetData)));
+    const fadeForLegend = !!(active && (sourceLegend || targetLegend));
     return fadeForSelection || fadeForLegend;
   }
 
@@ -1154,12 +1332,7 @@
   function applyNodeFading(node, linkLayer){
     const active = (state.activeCats && state.activeCats.size) ? new Set(state.activeCats) : null;
     try { node.classed('faded', function(d){ return shouldFadeNodeBySelectionAndLegend(d && d.data, active); }); } catch(e){}
-    try {
-      linkLayer.classed('faded', function(d){
-        return shouldFadeNodeBySelectionAndLegend(d && d.source && d.source.data, active)
-          || shouldFadeNodeBySelectionAndLegend(d && d.target && d.target.data, active);
-      });
-    } catch(e){}
+    try { linkLayer.classed('faded', function(d){ return shouldFadeLinkBySelectionAndLegend(d, active); }); } catch(e){}
   }
 
   /**
@@ -1313,7 +1486,14 @@
       .attr('data-has-ctype', d => (d && d.data && d.data.ctype) ? '1' : '')
       .attr('transform', d=> state.orientation==='horizontal' ? `translate(${d.y},${d.x})` : `translate(${d.x},${d.y})`)
       .classed('selected', d => !!(state.selectedId && d && d.data && d.data.id===state.selectedId))
-      .on('click', (ev, d)=> { if (state.showDetails) { ev.stopPropagation(); showDetails(d.data); } else { toggleNode(d.data); } })
+      .on('click', (ev, d)=> {
+        if (state.showDetails) {
+          ev.stopPropagation();
+          toggleNodeSelection(d.data, { showDetails: true, scrollVerse: true });
+        } else {
+          toggleNode(d.data);
+        }
+      })
       .on('mouseenter', (ev, d)=>{ try { const v = verseNumFromNode(d && d.data); if (v) setActiveVerseInPanel(v, false); } catch(e){} })
       .on('mouseleave', ()=>{ try { clearActiveVerseInPanel(); } catch(e){} });
     // Apply selection and legend-based fading
@@ -1437,10 +1617,8 @@
       let cat = null;
       li.className.split(/\s+/).forEach(c => { if (c.startsWith('cat-')) cat = c; });
       if (cat && state.highlightCats && state.highlightCats.has(cat)) li.classList.add('hl'); else li.classList.remove('hl');
-      const nodeId = li.getAttribute('data-node-id');
-      const fadeForSelection = !!(state.selectedId && nodeId !== String(state.selectedId));
-      const fadeForLegend = !!(active && (!cat || !active.has(cat)));
-      li.classList.toggle('faded', fadeForSelection || fadeForLegend);
+      const node = findNodeInStateById(li.getAttribute('data-node-id'));
+      li.classList.toggle('faded', shouldFadeNodeBySelectionAndLegend(node, active));
     });
   }
 
@@ -1471,7 +1649,10 @@
     if ((state.showGloss || state.showGlossKo) && (!content || !content.trim())) content = node.text || node.text_he || '';
     t.textContent = meta + content;
     line.appendChild(tog); line.appendChild(t); li.appendChild(line);
-    if (state.showDetails){ t.style.cursor='pointer'; t.addEventListener('click', ()=> showDetails(node)); }
+    if (state.showDetails){
+      t.style.cursor='pointer';
+      t.addEventListener('click', ()=> toggleNodeSelection(node, { showDetails: true, scrollVerse: true }));
+    }
     if(node.children&&node.children.length){ const ul=document.createElement('ul'); ul.className='indented'; if(!isCollapsed(node)) node.children.forEach(c=> ul.appendChild(renderItem(c,level+1))); li.appendChild(ul);} return li;
   }
 
@@ -1712,14 +1893,6 @@
 
   function showDetails(n){
     if (!detailsPanel) return;
-    try { if (n && typeof n.id !== 'undefined') { state.selectedId = n.id; } } catch(e) {}
-    // Sync versions panel active verse on selection
-    try {
-      const vnum = parseNodeVerseNum(n && n.verse);
-      if (vnum) setActiveVerseInPanel(vnum, true);
-    } catch(e){}
-    try { render(); } catch(e) {}
-    try { ensureListSelectionIntoView(); } catch(e){}
     // 경량 트리에서 상세 필드가 빠져 있으면 full tree로 승격 로드
     try {
       const missingTokens = !Array.isArray(n.tokens) || !n.tokens.length;
@@ -1732,6 +1905,7 @@
       }
     } catch(e) { /* ignore */ }
     // 헤더 메타
+    const detailNodeId = String((n && n.id) || '');
     const verse = norm(n.verse);
     const ctype = norm(n.ctype);
     const rela = norm(n.rela);
@@ -1752,6 +1926,7 @@
       return `<tr data-wid="${wid}"><td class="token-he">${w}</td><td class="token-lemma">${lemma}</td><td class="tok-gloss">${gloss}</td><td>${glossKo}</td><td class="mono">${sp}</td><td class="mono">${ps}</td><td class="mono">${nu}</td><td class="mono">${gn}</td><td class="mono">${st}</td><td class="mono">${vs}</td><td class="mono">${vt}</td></tr>`;
     }).join('');
     const koLine = n.gloss_ko ? `<div class="kv"><b>해석(한)</b>: ${escapeHtml(n.gloss_ko)}</div>` : '';
+    const literalPlaceholder = `<div class="kv" id="literalLine"></div>`;
     // KNT 절 텍스트 자리 표시자 (해석(한) 아래)
     const kntPlaceholder = `<div class="kv" id="kntVerseLine"></div>`;
     const nav = buildDetailsNav(n && n.id);
@@ -1760,6 +1935,7 @@
       <div class="kv"><b>절</b>: ${escapeHtml(verse)} &nbsp; <b>문장유형</b>: ${escapeHtml(ctype)} &nbsp; <b>관계</b>: ${escapeHtml(rela)}</div>
       <div class="kv"><b>텍스트 유형</b>: ${escapeHtml(txtType)} &nbsp; <b>기능</b>: ${escapeHtml(funcs)}</div>
       ${koLine}
+      ${literalPlaceholder}
       ${kntPlaceholder}
     `;
     const phrasePlaceholder = `<div class="section-title">구(phrase) 분해</div><div id="phraseSegments"></div>`;
@@ -1771,18 +1947,31 @@
       </table>
     `;
     detailsPanel.innerHTML = head + phrasePlaceholder + table;
+    detailsPanel.setAttribute('data-detail-node-id', detailNodeId);
     try { wireDetailsNav(n && n.id); } catch(e){}
+
+    loadLiteralIndex()
+      .then(() => {
+        if (detailsPanel.getAttribute('data-detail-node-id') !== detailNodeId) return;
+        const line = document.getElementById('literalLine');
+        if (!line) return;
+        const rendered = renderLiteralEntries(resolveLiteralEntriesForNode(n));
+        line.innerHTML = rendered;
+      })
+      .catch(() => {
+        if (detailsPanel.getAttribute('data-detail-node-id') !== detailNodeId) return;
+        const line = document.getElementById('literalLine');
+        if (line) line.innerHTML = '';
+      });
 
     // KNT 절 텍스트 로드: node.verse("GEN 01,03")에서 장/절 추출하여 백엔드 요청
     try {
-      const ref = (function parseVerseRef(s){
-        const m = /\b([0-9A-Z]{3})\s+(\d{2}),(\d{2})/.exec(String(s||''));
-        if (!m) return null; return { chapter: parseInt(m[2],10)||0, verse: parseInt(m[3],10)||0 };
-      })(verse);
+      const ref = parseVerseRef(verse);
       if (ref && ref.chapter && ref.verse){
         const book = (elBook && elBook.value) ? elBook.value : '';
         fetchVersionsChapter('knt', book, ref.chapter)
           .then(result => {
+            if (detailsPanel.getAttribute('data-detail-node-id') !== detailNodeId) return;
             const line = document.getElementById('kntVerseLine');
             if (!line) return;
             const verseItem = result && result.ok ? (result.verses || []).find(v => (parseInt(v && v.verse, 10) || 0) === ref.verse) : null;
@@ -1792,7 +1981,11 @@
               line.innerHTML = '';
             }
           })
-          .catch(() => { const line = document.getElementById('kntVerseLine'); if(line) line.innerHTML=''; });
+          .catch(() => {
+            if (detailsPanel.getAttribute('data-detail-node-id') !== detailNodeId) return;
+            const line = document.getElementById('kntVerseLine');
+            if(line) line.innerHTML='';
+          });
       }
     } catch(e) { /* ignore */ }
     // 구(phrase) 분해 로드 (칩 표시 + 토큰 표 색상 연동)
@@ -1872,10 +2065,10 @@
     walk(root, (n)=>{ if (!n) return; const id = n.id; if (id!==undefined && id!==null && id !== 'root') out.push(id); });
     return out;
   }
-  function findNodeById(id){
+  function findNodeInStateById(id){
     let found = null;
     if (!state || !state.data) return null;
-    walk(state.data, (n)=>{ if (found) return; if (n && n.id === id) found = n; });
+    walk(state.data, (n)=>{ if (found) return; if (n && String(n.id) === String(id)) found = n; });
     return found;
   }
   function ensurePathExpandedTo(id){
@@ -1907,9 +2100,8 @@
       if (nextIdx < 0 || nextIdx >= ids.length) return;
       const targetId = ids[nextIdx];
       ensurePathExpandedTo(targetId);
-      state.selectedId = targetId;
-      const node = findNodeById(targetId);
-      if (node) { try { render(); } catch(e){}; try { showDetails(node); } catch(e){} }
+      const node = findNodeInStateById(targetId);
+      if (node) applyNodeSelection(node, { showDetails: true, scrollVerse: true });
     } catch(e) { /* ignore */ }
   }
   function buildDetailsNav(currentId){

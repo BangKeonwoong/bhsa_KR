@@ -29,6 +29,16 @@ class ExportStaticTest(unittest.TestCase):
             self.assertTrue((out_dir / "data" / "tree" / "ctt" / "genesis" / "1-lite.json").exists())
             self.assertTrue((out_dir / "data" / "tree" / "ctt" / "genesis" / "1-full.json").exists())
             self.assertTrue((out_dir / "data" / "versions" / "knt" / "genesis" / "1.json").exists())
+            self.assertTrue((out_dir / "literal-index.json").exists())
+
+            literal_index = json.loads((out_dir / "literal-index.json").read_text(encoding="utf-8"))
+            self.assertEqual(literal_index["meta"]["book_count"], 39)
+            self.assertIn("Genesis", literal_index["books"])
+            self.assertIn("1", literal_index["books"]["Genesis"])
+            self.assertIn("1", literal_index["books"]["Genesis"]["1"])
+            first_clause = literal_index["books"]["Genesis"]["1"]["1"][0]
+            self.assertEqual(first_clause["clauseType"], "xQtX")
+            self.assertEqual(first_clause["koreanLiteral"], "태초에 하나님이 하늘들과 땅을 이미 창조하셨다")
 
     def test_static_assets_use_relative_docs_paths(self):
         with TemporaryDirectory() as tmp_dir:
