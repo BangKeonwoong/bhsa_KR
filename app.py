@@ -19,6 +19,6 @@ if __name__ == "__main__":
                 f.write(str(port))
         except Exception:
             pass
-    debug = os.environ.get("DEBUG", "1") not in ("0", "false", "False")
+    debug = os.environ.get("DEBUG", "0") not in ("0", "false", "False")
     app = create_app()
-    app.run(host=host, port=port, debug=debug)
+    app.run(host=host, port=port, debug=debug, use_reloader=debug)

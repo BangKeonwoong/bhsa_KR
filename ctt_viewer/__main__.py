@@ -10,10 +10,9 @@ def main() -> None:
         port = int(os.environ.get("PORT", "5001"))
     except Exception:
         port = 5001
-    debug = os.environ.get("DEBUG", "1") not in ("0", "false", "False")
-    app.run(host=host, port=port, debug=debug)
+    debug = os.environ.get("DEBUG", "0") not in ("0", "false", "False")
+    app.run(host=host, port=port, debug=debug, use_reloader=debug)
 
 
 if __name__ == "__main__":
     main()
-
