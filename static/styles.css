@@ -76,6 +76,7 @@ main {
 .tree-node circle { r: 3px; fill: #999; }
 .tree-node text {
   font-size: 12px;
+  line-height: 1.18;
   font-family: 'Accordance', 'SBL Hebrew', 'Ezra SIL', 'Noto Sans Hebrew', system-ui, sans-serif;
   font-variant-ligatures: contextual;
   -webkit-font-smoothing: antialiased;
@@ -117,6 +118,7 @@ main {
   fill: #333;
   font-style: italic;
 }
+.tree-node text tspan { dominant-baseline: central; }
 .tree-node text tspan.tok-subj { fill: #dc2626; font-weight: 600; }
 .tree-node text tspan.tok-pred { fill: #2563eb; font-weight: 600; }
 .tree-node text tspan.label-morph {

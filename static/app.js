@@ -63,6 +63,147 @@
   const LITERAL_BOOK_OVERRIDES = {
     'song of songs': 'Song_of_songs',
   };
+  const TIDY_LABEL_MAX_WIDTH_PX = 260;
+  const TIDY_LABEL_PAD_X = 8;
+  const TIDY_LABEL_PAD_Y = 4;
+  const TIDY_LABEL_LINE_HEIGHT_EM = 1.15;
+  const TIDY_LABEL_LINE_HEIGHT_PX = 14;
+  const TIDY_LABEL_BASELINE_EM = 0.32;
+
+  function estimateCharWidthPx(ch){
+    if (!ch) return 0;
+    if (/\s/.test(ch)) return 3.5;
+    if (/[|/\\,.;:!?()[\]{}'"`~-]/.test(ch)) return 4.5;
+    if (/[A-Z]/.test(ch)) return 7.1;
+    if (/[a-z0-9]/.test(ch)) return 6.1;
+    return 9.2;
+  }
+  function estimateTextWidthPx(text){
+    return Array.from(String(text || '')).reduce((sum, ch) => sum + estimateCharWidthPx(ch), 0);
+  }
+  function splitSegmentForWrap(segment){
+    const text = String(segment && segment.text || '');
+    if (!text) return [];
+    const regex = /( \| |[\s]+|[.,;:!?()[\]{}'"`~/\\-]+)/g;
+    const parts = text.split(regex).filter(Boolean);
+    return parts.map(part => ({ text: part, className: segment && segment.className ? segment.className : null }));
+  }
+  function splitLongSegment(segment, maxWidthPx){
+    const text = String(segment && segment.text || '');
+    if (!text) return [];
+    const out = [];
+    let chunk = '';
+    let width = 0;
+    for (const ch of Array.from(text)){
+      const chWidth = estimateCharWidthPx(ch);
+      if (chunk && width + chWidth > maxWidthPx){
+        out.push({ text: chunk, className: segment && segment.className ? segment.className : null });
+        chunk = ch;
+        width = chWidth;
+      } else {
+        chunk += ch;
+        width += chWidth;
+      }
+    }
+    if (chunk) out.push({ text: chunk, className: segment && segment.className ? segment.className : null });
+    return out;
+  }
+  function normalizeLineSegments(segments){
+    const line = [];
+    for (const seg of Array.isArray(segments) ? segments : []){
+      const text = String(seg && seg.text || '');
+      if (!text) continue;
+      line.push({ text, className: seg && seg.className ? seg.className : null });
+    }
+    while (line.length && !String(line[0].text || '').trim()) line.shift();
+    while (line.length && !String(line[line.length - 1].text || '').trim()) line.pop();
+    return line;
+  }
+  function wrapLabelSegments(rawSegments, maxWidthPx){
+    const pieces = [];
+    for (const seg of Array.isArray(rawSegments) ? rawSegments : []){
+      const parts = splitSegmentForWrap(seg);
+      if (parts.length) pieces.push(...parts);
+    }
+    const lines = [];
+    let current = [];
+    let currentWidth = 0;
+    const pushLine = () => {
+      const normalized = normalizeLineSegments(current);
+      if (normalized.length) lines.push(normalized);
+      current = [];
+      currentWidth = 0;
+    };
+    for (const piece of pieces){
+      const pieceText = String(piece && piece.text || '');
+      if (!pieceText) continue;
+      const pieceWidth = estimateTextWidthPx(pieceText);
+      if (current.length && currentWidth + pieceWidth > maxWidthPx){
+        pushLine();
+      }
+      if (pieceWidth > maxWidthPx){
+        const chunks = splitLongSegment(piece, maxWidthPx);
+        chunks.forEach((chunk, idx) => {
+          if (current.length && idx === 0) pushLine();
+          current.push(chunk);
+          currentWidth += estimateTextWidthPx(chunk.text);
+          if (idx < chunks.length - 1) pushLine();
+        });
+        continue;
+      }
+      if (!current.length && !pieceText.trim()) continue;
+      current.push(piece);
+      currentWidth += pieceWidth;
+    }
+    pushLine();
+    return lines.length ? lines : [[{ text: '', className: null }]];
+  }
+  function renderWrappedLabelIntoText(textEl, rawSegments){
+    if (!textEl) return { lineCount: 0 };
+    const sel = d3.select(textEl);
+    const lines = wrapLabelSegments(rawSegments, TIDY_LABEL_MAX_WIDTH_PX);
+    const startDy = TIDY_LABEL_BASELINE_EM - ((Math.max(lines.length, 1) - 1) * TIDY_LABEL_LINE_HEIGHT_EM / 2);
+    sel.text('');
+    lines.forEach((line, lineIdx) => {
+      const segments = normalizeLineSegments(line);
+      if (!segments.length) return;
+      segments.forEach((seg, segIdx) => {
+        const span = sel.append('tspan');
+        if (segIdx === 0) span.attr('x', 0);
+        if (segIdx === 0) {
+          span.attr('dy', `${lineIdx === 0 ? startDy : TIDY_LABEL_LINE_HEIGHT_EM}em`);
+        }
+        if (seg.className) span.attr('class', seg.className);
+        span.text(seg.text);
+      });
+    });
+    return { lineCount: lines.length };
+  }
+  function resizeNodeRectForText(textEl){
+    if (!textEl || !textEl.parentNode) return;
+    try {
+      const bbox = textEl.getBBox();
+      const w = Math.max(10, Math.min(TIDY_LABEL_MAX_WIDTH_PX, bbox.width) + TIDY_LABEL_PAD_X * 2);
+      const h = Math.max(16, bbox.height + TIDY_LABEL_PAD_Y * 2);
+      const rx = -w / 2;
+      const ry = -h / 2;
+      d3.select(textEl.parentNode).select('rect.node-rect')
+        .attr('x', rx).attr('y', ry)
+        .attr('width', w).attr('height', h);
+    } catch(e) { /* ignore */ }
+  }
+  function estimateWrappedLabelLayout(text){
+    const lines = wrapLabelSegments([{ text: String(text || ''), className: null }], TIDY_LABEL_MAX_WIDTH_PX);
+    const longest = lines.reduce((max, line) => {
+      const width = line.reduce((sum, seg) => sum + estimateTextWidthPx(seg && seg.text), 0);
+      return Math.max(max, width);
+    }, 0);
+    return {
+      width: Math.max(56, Math.min(TIDY_LABEL_MAX_WIDTH_PX, longest) + TIDY_LABEL_PAD_X * 2),
+      height: Math.max(18, lines.length * TIDY_LABEL_LINE_HEIGHT_PX + TIDY_LABEL_PAD_Y * 2),
+      lines,
+    };
+  }
 
   // --- Local storage helpers ---
   const LS_PREFIX = 'cttViewer:';
@@ -1386,6 +1527,28 @@
     try { linkLayer.classed('faded', function(d){ return shouldFadeLinkBySelectionAndLegend(d, active); }); } catch(e){}
   }
 
+  function buildTidyLabelSegments(data){
+    if (!data) return [{ text: '', className: null }];
+    const meta = `${data.verse || ''} – ${data.ctype || ''} – `;
+    let content = '';
+    let className = null;
+    if (state.showLiteralKo) {
+      content = nodeLiteralTextTidyKo(data);
+    } else if (state.showGlossKo) {
+      content = nodeGlossTextTidyKo(data);
+    } else if (state.showGloss) {
+      content = nodeGlossText(data);
+      className = 'label-gloss';
+    } else {
+      content = (data.text_he || data.text || '');
+      className = 'label-he';
+    }
+    return [
+      { text: meta, className: 'label-meta' },
+      { text: content || '', className },
+    ];
+  }
+
   /**
    * Add text labels to each node and, on next frame, measure and insert
    * rounded rect backgrounds sized to the text. Also raises the selected
@@ -1396,27 +1559,31 @@
       .attr('dy','0.32em')
       .attr('x', 0)
       .attr('text-anchor', 'middle')
-      .text(d=> { try { return labelTextForNodeCb ? labelTextForNodeCb(d) : ''; } catch(e){ return ''; } });
-    const padX = 8, padY = 4;
+      .each(function(d){
+        try {
+          const segments = buildTidyLabelSegments(d && d.data);
+          renderWrappedLabelIntoText(this, segments);
+        } catch(e) {
+          renderWrappedLabelIntoText(this, [{ text: '', className: null }]);
+        }
+      });
     requestAnimationFrame(() => {
       try {
         textSel.each(function(d){
           try {
-            const bbox = this.getBBox();
-            const w = Math.max(10, bbox.width + padX*2);
-            const h = Math.max(16, bbox.height + padY*2);
-            const rx = -w/2; const ry = -h/2;
             d3.select(this.parentNode).insert('rect','text')
               .attr('class','node-rect ' + clauseClass(d && d.data))
-              .attr('x', rx).attr('y', ry).attr('width', w).attr('height', h);
-            d3.select(this).attr('x', 0).attr('dy', '0.32em');
+              .attr('x', -20).attr('y', -12).attr('width', 40).attr('height', 24);
+            resizeNodeRectForText(this);
+            d3.select(this).attr('x', 0);
           } catch (e) {
-            const name = (d && d.data && d.data.name) ? d.data.name : '';
-            const w = Math.max(40, name.length * 6) + padX*2; const h = 18 + padY*2; const rx = -w/2; const ry = -h/2;
+            const rawLabel = labelTextForNodeCb ? labelTextForNodeCb(d) : ((d && d.data && d.data.name) ? d.data.name : '');
+            const layout = estimateWrappedLabelLayout(rawLabel);
             d3.select(this.parentNode).insert('rect','text')
               .attr('class','node-rect ' + clauseClass(d && d.data))
-              .attr('x', rx).attr('y', ry).attr('width', w).attr('height', h);
-            d3.select(this).attr('x', 0).attr('dy', '0.32em');
+              .attr('x', -layout.width/2).attr('y', -layout.height/2)
+              .attr('width', layout.width).attr('height', layout.height);
+            d3.select(this).attr('x', 0);
           }
         });
         try { node.selectAll('rect.node-rect').classed('hl', function(d){ const cat = clauseClass(d && d.data); return !!(state.highlightCats && state.highlightCats.has(cat)); }); } catch(e){}
@@ -1499,20 +1666,24 @@
       } catch(e){ return String(d && d.data && d.data.name || ''); }
     }
     function estLabelWidthPx(d){
-      const t = labelTextForNode(d);
-      // approx average char width 6px + padding
-      return Math.min(800, t.length * 6 + 16);
+      const layout = estimateWrappedLabelLayout(labelTextForNode(d));
+      return layout.width;
+    }
+    function estLabelHeightPx(d){
+      const layout = estimateWrappedLabelLayout(labelTextForNode(d));
+      return layout.height;
     }
     const tree=d3.tree().nodeSize([dx,dy]).separation((a,b)=>{
       // Base separation smaller to tighten vertical spacing
       const sameParent = (a.parent===b.parent);
       const baseSep = sameParent ? 0.9 : 1.25;
       // Compute minimal separation to avoid label overlap (estimated)
-      const wa = estLabelWidthPx(a), wb = estLabelWidthPx(b);
-      const requiredPx = (wa + wb) / 2 + 8; // centers must be at least this far apart
+      const dimA = state.orientation === 'horizontal' ? estLabelHeightPx(a) : estLabelWidthPx(a);
+      const dimB = state.orientation === 'horizontal' ? estLabelHeightPx(b) : estLabelWidthPx(b);
+      const requiredPx = (dimA + dimB) / 2 + 8;
       const sepNeeded = requiredPx / dx;    // convert px to separation units
       // Clamp to reasonable bounds to avoid excessive spread for very long labels
-      return Math.min(3.0, Math.max(baseSep, sepNeeded));
+      return Math.min(4.5, Math.max(baseSep, sepNeeded));
     });
     tree(root);
     let x0=Infinity,x1=-x0; root.each(d=>{ if(d.x>x1)x1=d.x; if(d.x<x0)x0=d.x; });
@@ -1629,10 +1800,10 @@
           const isH = (state.orientation==='horizontal');
           const x = isH ? d.y : d.x;
           const y = isH ? d.x : d.y;
-          // conservative width estimate
-          const t = (d && d.data && (d.data.name || '')) + '';
-          const w = Math.min(1000, t.length * 6 + 16);
-          const h = 22;
+          const t = labelTextForNode(d);
+          const layout = estimateWrappedLabelLayout(t);
+          const w = layout.width;
+          const h = layout.height;
           minX = Math.min(minX, x - w/2); maxX = Math.max(maxX, x + w/2);
           minY = Math.min(minY, y - h/2); maxY = Math.max(maxY, y + h/2);
         });
@@ -2287,7 +2458,6 @@
 
   function rebuildTidyTextWithSeg(textEl, data, segs){
     if (!textEl || !data) return;
-    const sel = d3.select(textEl);
     // Build token order and subject/predicate sets
     const subj = new Set();
     const pred = new Set();
@@ -2303,28 +2473,20 @@
       }
     }
     if (!order.length) return; // nothing to decorate
-    // Rebuild text with tspans
-    sel.text('');
     const meta = `${data.verse || ''} – ${data.ctype || ''} – `;
-    sel.append('tspan').attr('class','label-meta').text(meta);
     if (state.showLiteralKo){
       const literalText = nodeLiteralTextTidyKo(data);
-      sel.append('tspan').text(literalText);
-      try {
-        const bbox = textEl.getBBox();
-        const w = Math.max(10, bbox.width + 16);
-        const h = Math.max(16, bbox.height + 8);
-        const rx = -w/2, ry = -h/2;
-        const parent = d3.select(textEl.parentNode);
-        parent.select('rect.node-rect')
-          .attr('x', rx).attr('y', ry)
-          .attr('width', w).attr('height', h);
-      } catch(e) { /* ignore */ }
+      renderWrappedLabelIntoText(textEl, [
+        { text: meta, className: 'label-meta' },
+        { text: literalText, className: null },
+      ]);
+      resizeNodeRectForText(textEl);
       return;
     }
     const useKo = !!state.showGlossKo;
     const useEn = !useKo && !!state.showGloss;
     const delim = useKo || useEn ? ' | ' : ' ';
+    const pieces = [{ text: meta, className: 'label-meta' }];
     order.forEach((t, idx) => {
       const wid = (t && (t.wid || t.id)) ? String(t.wid || t.id) : '';
       let txt = '';
@@ -2332,22 +2494,10 @@
       else if (useEn){ txt = norm(t && t.gloss); }
       else { txt = norm(t && t.w); }
       const cls = subj.has(wid) ? 'tok-subj' : (pred.has(wid) ? 'tok-pred' : null);
-      if (idx>0) sel.append('tspan').text(delim);
-      const span = sel.append('tspan');
-      if (cls) span.attr('class', cls);
-      span.text(txt);
+      pieces.push({ text: `${idx>0 ? delim : ''}${txt}`, className: cls });
     });
-    // Resize rect to fit new text
-    try {
-      const bbox = textEl.getBBox();
-      const w = Math.max(10, bbox.width + 16);
-      const h = Math.max(16, bbox.height + 8);
-      const rx = -w/2, ry = -h/2;
-      const parent = d3.select(textEl.parentNode);
-      parent.select('rect.node-rect')
-        .attr('x', rx).attr('y', ry)
-        .attr('width', w).attr('height', h);
-    } catch(e) { /* ignore */ }
+    renderWrappedLabelIntoText(textEl, pieces);
+    resizeNodeRectForText(textEl);
   }
 
   async function decorateTidyNodeLabel(textEl, data){
