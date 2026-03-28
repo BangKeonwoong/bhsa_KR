@@ -4,6 +4,8 @@
     collapsed: new Set(),
     orientation: 'horizontal',
     showGloss: false,
+    showGlossKo: false,
+    showLiteralKo: false,
     depthLimit: 0,
     tidyZoom: null, // {k,x,y}
     baseTranslate: { x: 40, y: 0 },
@@ -32,6 +34,7 @@
   const selSource = document.getElementById('sourceSel');
   const chkGloss = document.getElementById('toggleGloss');
   const chkGlossKo = document.getElementById('toggleGlossKo');
+  const chkLiteralKo = document.getElementById('toggleLiteralKo');
   const chkLegend = document.getElementById('toggleLegend');
   const chkDetails = document.getElementById('toggleDetails');
   const tidyView = document.getElementById('tidyView');
@@ -65,6 +68,30 @@
   const LS_PREFIX = 'cttViewer:';
   function setPref(k, v){ try { localStorage.setItem(LS_PREFIX + k, String(v)); } catch(e){} }
   function getPref(k, defVal){ try { const v = localStorage.getItem(LS_PREFIX + k); return (v===null||v===undefined)? defVal : v; } catch(e){ return defVal; } }
+  function syncLabelModeChecks(){
+    try { if (chkGloss) chkGloss.checked = !!state.showGloss; } catch(e){}
+    try { if (chkGlossKo) chkGlossKo.checked = !!state.showGlossKo; } catch(e){}
+    try { if (chkLiteralKo) chkLiteralKo.checked = !!state.showLiteralKo; } catch(e){}
+  }
+  function persistLabelModePrefs(){
+    try { setPref('gloss', state.showGloss ? '1' : '0'); } catch(e){}
+    try { setPref('glossKo', state.showGlossKo ? '1' : '0'); } catch(e){}
+    try { setPref('literalKo', state.showLiteralKo ? '1' : '0'); } catch(e){}
+  }
+  function ensureLiteralIndexLoadedForLabels(){
+    if (!state.showLiteralKo || state.literalIndex || state.literalIndexPromise) return;
+    loadLiteralIndex()
+      .then(() => { if (state.showLiteralKo) render(); })
+      .catch(() => {});
+  }
+  function setLabelMode(mode){
+    state.showGloss = mode === 'gloss';
+    state.showGlossKo = mode === 'glossKo';
+    state.showLiteralKo = mode === 'literalKo';
+    syncLabelModeChecks();
+    persistLabelModePrefs();
+    if (state.showLiteralKo) ensureLiteralIndexLoadedForLabels();
+  }
 
   // Spinner + Toast
   let _loadCount = 0;
@@ -144,8 +171,15 @@
       if (!q.orientation && selOrient){ selOrient.value = getPref('orientation','horizontal'); }
       if (selAnchorMode){ selAnchorMode.value = getPref('anchor','selection') || 'selection'; state.anchorMode = selAnchorMode.value; }
       // toggles and sliders
-      try { if (chkGloss) chkGloss.checked = (getPref('gloss','')==='1'); } catch(e){}
-      try { if (chkGlossKo) chkGlossKo.checked = (getPref('glossKo','')==='1'); } catch(e){}
+      try {
+        const showLiteralKo = getPref('literalKo','') === '1';
+        const showGlossKo = !showLiteralKo && getPref('glossKo','') === '1';
+        const showGloss = !showLiteralKo && !showGlossKo && getPref('gloss','') === '1';
+        state.showGloss = showGloss;
+        state.showGlossKo = showGlossKo;
+        state.showLiteralKo = showLiteralKo;
+        syncLabelModeChecks();
+      } catch(e){}
       try { if (chkLegend) { const v = getPref('legend','1'); chkLegend.checked = (v==='1'); legendPanel.classList.toggle('visible', chkLegend.checked); } } catch(e){}
       try { if (chkDetails) { const v = getPref('details','1'); chkDetails.checked = (v==='1'); detailsPanel.classList.toggle('visible', chkDetails.checked); if (detailsResizer) detailsResizer.classList.toggle('visible', chkDetails.checked); } } catch(e){}
       try { const sp = parseInt(getPref('spacing','')||'0',10); if (sp && spacingRange) { spacingRange.value = String(sp); spacingValue.textContent = String(sp); state.spacing = sp; } } catch(e){}
@@ -205,7 +239,7 @@
   if (selSource) selSource.addEventListener('change', () => { try { setPref('source', selSource.value||''); } catch(e){} updateUrlFromState(false); loadData(); });
   window.addEventListener('popstate', () => { applyInitialStateFromQuery(); loadData(); });
   if (chkGloss) chkGloss.addEventListener('change', ()=> {
-    state.showGloss = !!chkGloss.checked;
+    setLabelMode(chkGloss.checked ? 'gloss' : null);
     // 토글 직후 gloss 데이터가 하나도 없으면(경량 모드 가정) 상세 포함으로 재요청
     if (state.showGloss && state.data && !hasAnyGloss(state.data)) {
       reloadWithDetails();
@@ -214,11 +248,15 @@
     render();
   });
   if (chkGlossKo) chkGlossKo.addEventListener('change', ()=> {
-    state.showGlossKo = !!chkGlossKo.checked;
+    setLabelMode(chkGlossKo.checked ? 'glossKo' : null);
     if (state.showGlossKo && state.data && !hasAnyGloss(state.data)) {
       reloadWithDetails();
       return;
     }
+    render();
+  });
+  if (chkLiteralKo) chkLiteralKo.addEventListener('change', ()=> {
+    setLabelMode(chkLiteralKo.checked ? 'literalKo' : null);
     render();
   });
   if (chkLegend) chkLegend.addEventListener('change', ()=> {
@@ -1177,6 +1215,19 @@
     }
     return `<b>직역</b>: ${lines.map(line => `<span class="literal-entry">${escapeHtml(line)}</span>`).join('<br>')}`;
   }
+  function nodeLiteralTextTidyKo(node){
+    if (!state.literalIndex){
+      ensureLiteralIndexLoadedForLabels();
+      return (node && (node.text_he || node.text)) ? (node.text_he || node.text) : '';
+    }
+    const entries = resolveLiteralEntriesForNode(node);
+    if (!entries.length) return (node && (node.text_he || node.text)) ? (node.text_he || node.text) : '';
+    const lines = entries
+      .map(entry => String(entry && entry.koreanLiteral || '').trim())
+      .filter(Boolean);
+    if (!lines.length) return (node && (node.text_he || node.text)) ? (node.text_he || node.text) : '';
+    return lines.join(' | ');
+  }
   function setSelectedNodeState(node){
     const selectedId = node && node.id !== undefined && node.id !== null ? node.id : null;
     state.selectedId = selectedId;
@@ -1435,7 +1486,9 @@
       try{
         const meta = `${d.data.verse || ''} – ${d.data.ctype || ''} – `;
         let content = '';
-        if (state.showGlossKo) {
+        if (state.showLiteralKo) {
+          content = nodeLiteralTextTidyKo(d.data);
+        } else if (state.showGlossKo) {
           content = nodeGlossTextTidyKo(d.data);
         } else if (state.showGloss) {
           content = nodeGlossText(d.data);
@@ -1639,14 +1692,16 @@
     const t=document.createElement('span'); t.className='name';
     const meta = `${node.verse || ''} – ${node.ctype || ''} – `;
     let content = '';
-    if (state.showGlossKo) {
+    if (state.showLiteralKo) {
+      content = nodeLiteralTextTidyKo(node);
+    } else if (state.showGlossKo) {
       content = nodeGlossTextTidyKo(node);
     } else if (state.showGloss) {
       content = nodeGlossText(node);
     } else {
       content = (node.text_he || node.text || '');
     }
-    if ((state.showGloss || state.showGlossKo) && (!content || !content.trim())) content = node.text || node.text_he || '';
+    if ((state.showGloss || state.showGlossKo || state.showLiteralKo) && (!content || !content.trim())) content = node.text || node.text_he || '';
     t.textContent = meta + content;
     line.appendChild(tog); line.appendChild(t); li.appendChild(line);
     if (state.showDetails){
@@ -2252,6 +2307,21 @@
     sel.text('');
     const meta = `${data.verse || ''} – ${data.ctype || ''} – `;
     sel.append('tspan').attr('class','label-meta').text(meta);
+    if (state.showLiteralKo){
+      const literalText = nodeLiteralTextTidyKo(data);
+      sel.append('tspan').text(literalText);
+      try {
+        const bbox = textEl.getBBox();
+        const w = Math.max(10, bbox.width + 16);
+        const h = Math.max(16, bbox.height + 8);
+        const rx = -w/2, ry = -h/2;
+        const parent = d3.select(textEl.parentNode);
+        parent.select('rect.node-rect')
+          .attr('x', rx).attr('y', ry)
+          .attr('width', w).attr('height', h);
+      } catch(e) { /* ignore */ }
+      return;
+    }
     const useKo = !!state.showGlossKo;
     const useEn = !useKo && !!state.showGloss;
     const delim = useKo || useEn ? ' | ' : ' ';
